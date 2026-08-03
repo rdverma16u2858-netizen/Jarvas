@@ -28,7 +28,7 @@ import { PageNav } from "@/components/PageNav";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { QuestionCard } from "@/components/QuestionCard";
-import { ApiError, NetworkError } from "@/lib/api";
+import { ApiError, IS_LOCAL_API, NetworkError } from "@/lib/api";
 import {
   bookmarkQuestion,
   generateQuestions,
@@ -133,7 +133,11 @@ export default function PracticePage() {
         // Cancelled on purpose; nothing to report.
       } else if (caught instanceof NetworkError) {
         setError("Cannot reach the backend.");
-        setHint("Start it with:  cd backend && uvicorn app.main:app --reload");
+        setHint(
+          IS_LOCAL_API
+            ? "Start it with:  cd backend && uvicorn app.main:app --reload"
+            : "The API server is not responding. It may be starting up — wait a moment and try again.",
+        );
       } else if (caught instanceof ApiError) {
         setError(
           caught.status === 429

@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Sidebar } from "@/components/Sidebar";
 import { SolutionCard } from "@/components/SolutionCard";
-import { ApiError, NetworkError } from "@/lib/api";
+import { ApiError, IS_LOCAL_API, NetworkError } from "@/lib/api";
 import {
   getConversation,
   setBookmark,
@@ -244,7 +244,9 @@ export default function ChatPage() {
         if (error instanceof NetworkError) {
           fail(
             "Cannot reach the backend.",
-            "Start it with:  cd backend && uvicorn app.main:app --reload",
+            IS_LOCAL_API
+              ? "Start it with:  cd backend && uvicorn app.main:app --reload"
+              : "The API server is not responding. It may be starting up — wait a moment and try again.",
           );
         } else if (error instanceof ApiError) {
           fail(

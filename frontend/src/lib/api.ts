@@ -25,6 +25,19 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
+/**
+ * True when the API lives on this machine.
+ *
+ * Gates the "start the backend with uvicorn" hint. On a deployed site that
+ * instruction is not merely unhelpful, it is wrong — the visitor has no
+ * checkout, no terminal, and nothing they could start. Telling them to run a
+ * command sends them looking for a problem on their own computer when the
+ * fault is a server they do not control.
+ */
+export const IS_LOCAL_API = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(
+  API_BASE_URL,
+);
+
 // Imported after API_BASE_URL: auth.ts reads it, and the other direction
 // would be a cycle.
 import { authHeaders, clearToken } from "./auth";

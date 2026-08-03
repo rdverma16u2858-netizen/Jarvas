@@ -21,7 +21,7 @@ import { PageNav } from "@/components/PageNav";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ReviewCard } from "@/components/ReviewCard";
-import { ApiError, NetworkError } from "@/lib/api";
+import { ApiError, IS_LOCAL_API, NetworkError } from "@/lib/api";
 import {
   ERROR_LABEL,
   getPatterns,
@@ -94,7 +94,11 @@ export default function CheckPage() {
         // Cancelled on purpose.
       } else if (caught instanceof NetworkError) {
         setError("Cannot reach the backend.");
-        setHint("Start it with:  cd backend && uvicorn app.main:app --reload");
+        setHint(
+          IS_LOCAL_API
+            ? "Start it with:  cd backend && uvicorn app.main:app --reload"
+            : "The API server is not responding. It may be starting up — wait a moment and try again.",
+        );
       } else if (caught instanceof ApiError) {
         setError(
           caught.status === 429

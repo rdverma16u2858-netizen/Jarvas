@@ -28,6 +28,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { NetworkError, UnauthorizedError } from "@/lib/api";
+
 import {
   archiveConversation,
   deleteConversation,
@@ -100,12 +102,30 @@ export function Sidebar({
     onClose();
   }
 
+  /**
+   * Turn a failure into something true.
+   *
+   * These three read identically to a user and mean entirely different
+   * things. Reporting a 401 as "cannot reach the backend" sends someone to
+   * check whether their server is running when in fact they are signed out —
+   * and the server is answering perfectly.
+   *
+   * A 401 gets no message at all: `apiFetch` has already announced it, and
+   * the whole app is about to swap to the login screen. A message here would
+   * flash and vanish.
+   */
+  function describe(caught: unknown): string {
+    if (caught instanceof UnauthorizedError) return "";
+    if (caught instanceof NetworkError) return "Cannot reach the backend.";
+    return "Could not load your chats.";
+  }
+
   const loadConversations = useCallback(async () => {
     try {
       setConversations(await listConversations());
       setError("");
-    } catch {
-      setError("Cannot reach the backend.");
+    } catch (caught) {
+      setError(describe(caught));
     }
   }, []);
 
@@ -113,8 +133,8 @@ export function Sidebar({
     try {
       setSaved(await listBookmarks());
       setError("");
-    } catch {
-      setError("Cannot reach the backend.");
+    } catch (caught) {
+      setError(describe(caught));
     }
   }, []);
 
