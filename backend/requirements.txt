@@ -1,0 +1,46 @@
+# MathBot backend dependencies
+# ---------------------------------------------------------------------------
+# ASCII only, deliberately: pip on Windows reads this file with the system
+# codepage (cp1252), not UTF-8, so a non-ASCII character here breaks install
+# with a UnicodeDecodeError. Keep comments plain.
+#
+# Versions use `~=` (compatible release): patch and minor updates are allowed,
+# major ones are not. Picks up security fixes without a major version silently
+# breaking the build months from now.
+#
+# Install:  pip install -r requirements.txt
+
+# --- Web framework ---------------------------------------------------------
+fastapi~=0.118.0            # async API framework; generates OpenAPI docs
+uvicorn[standard]~=0.37.0   # ASGI server. [standard] adds uvloop + httptools
+
+# --- Configuration ---------------------------------------------------------
+pydantic~=2.12.0            # validation; powers request/response schemas
+pydantic-settings~=2.11.0   # loads and validates .env into Settings
+
+# --- Database --------------------------------------------------------------
+sqlalchemy[asyncio]~=2.0.44 # ORM, async engine
+alembic~=1.16.0             # schema migrations
+aiosqlite~=0.21.0           # async SQLite driver - local development
+asyncpg~=0.30.0             # async Postgres driver - docker + production
+
+# --- Cache -----------------------------------------------------------------
+redis~=6.4.0                # async Redis client. Optional at runtime: unset
+                            # REDIS_URL and the in-memory cache is used.
+
+# --- Mathematics -----------------------------------------------------------
+sympy~=1.14.0               # symbolic algebra - independently verifies every
+                            # answer. Pulls in mpmath, used for the fast
+                            # numerical quadrature path.
+
+# --- Testing ---------------------------------------------------------------
+pytest~=8.4.0
+pytest-asyncio~=1.2.0       # lets pytest run `async def` tests
+httpx~=0.28.0               # async HTTP client; FastAPI's test client uses it
+
+# --- Code quality ----------------------------------------------------------
+ruff~=0.14.0                # linter + formatter, replaces flake8/black/isort
+
+# --- Added in later phases -------------------------------------------------
+# Phase 1  anthropic         Claude SDK (also openai, google-genai)
+# Phase 9  pillow            image handling for OCR uploads

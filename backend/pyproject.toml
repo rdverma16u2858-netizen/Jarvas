@@ -1,0 +1,47 @@
+# Tooling configuration for the backend.
+# ═════════════════════════════════════════════════════════════════════════
+# One file instead of pytest.ini + .ruff.toml + setup.cfg. Only tool config
+# lives here — dependencies stay in requirements.txt, which is what Docker and
+# CI install from.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]           # lets tests `import app.*` without installing the package
+
+# Run `async def` tests without decorating every one with @pytest.mark.asyncio.
+asyncio_mode = "auto"
+# Each test gets a fresh event loop, so a loop left in a bad state by one test
+# cannot affect the next.
+asyncio_default_fixture_loop_scope = "function"
+
+addopts = [
+    "-v",
+    "--strict-markers",      # a typo'd @pytest.mark is an error, not a silent no-op
+    "--tb=short",
+]
+
+[tool.ruff]
+line-length = 95
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes — unused imports, undefined names
+    "I",    # isort — import ordering
+    "B",    # bugbear — likely bugs (mutable default args, etc.)
+    "UP",   # pyupgrade — modern syntax for the target version
+    "N",    # pep8-naming
+    "ASYNC",# async-specific pitfalls, e.g. blocking calls in async functions
+]
+ignore = [
+    "E501",  # line length — the formatter owns this
+    "B008",  # function call in a default arg: `Depends(get_db)` is the FastAPI idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import the app after setting env vars, which is a deliberate E402.
+"tests/*" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,0 +1,128 @@
+# Continuous integration.
+# ---------------------------------------------------------------------------
+# Runs on every push and pull request. Catches the failures that are cheap to
+# find automatically and expensive to find in production:
+#
+#   · a test that passes on Windows and fails on Linux (CI runs Ubuntu)
+#   · a type error nobody type-checked locally
+#   · code that works on SQLite and breaks on Postgres
+#
+# The backend job runs the suite TWICE — once on SQLite, once on real Postgres.
+# That matters: SQLite is forgiving about types and constraints in ways
+# Postgres is not, so a migration or query can pass locally and fail on deploy.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-progress run when a new commit is pushed to the same branch —
+# no point spending minutes testing code that has already been superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (${{ matrix.database }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Run every combination even if one fails, so a Postgres-only failure is
+      # not hidden by an unrelated SQLite failure.
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgres]
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mathbot
+          POSTGRES_PASSWORD: mathbot
+          POSTGRES_DB: mathbot_test
+        ports:
+          - 5432:5432
+        # The job's first step must not run before Postgres accepts
+        # connections, or the suite fails on a race rather than a real bug.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # Cache pip downloads between runs, keyed on requirements.txt.
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        # Fails the build on lint errors rather than merely reporting them.
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Run tests
+        env:
+          DATABASE_URL: ${{ matrix.database == 'postgres'
+            && 'postgresql+asyncpg://mathbot:mathbot@localhost:5432/mathbot_test'
+            || 'sqlite+aiosqlite:///./test_ci.db' }}
+          # Exercise the real Redis path in the Postgres matrix leg and the
+          # in-memory fallback in the SQLite leg, so both are covered.
+          REDIS_URL: ${{ matrix.database == 'postgres' && 'redis://localhost:6379/0' || '' }}
+          ENV: local
+        run: pytest
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # `npm ci` requires a lockfile and installs it exactly — reproducible
+        # builds, and it fails loudly if the lockfile is out of date.
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

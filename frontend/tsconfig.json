@@ -1,0 +1,35 @@
+{
+  // TypeScript configuration.
+  // -------------------------------------------------------------------------
+  // The two settings that matter most here are `strict` and `paths`; the rest
+  // is the standard Next.js App Router setup.
+  "compilerOptions": {
+    // Every strict check on. Catching a possible `undefined` at compile time
+    // is the entire reason for using TypeScript rather than JavaScript.
+    "strict": true,
+
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    "jsx": "preserve", // Next.js runs its own JSX transform
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "allowJs": true,
+    "skipLibCheck": true, // don't type-check node_modules — much faster builds
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true, // Next.js compiles; tsc only type-checks
+    "incremental": true,
+
+    // `@/lib/api` instead of `../../../lib/api`. Import paths stay stable when
+    // a file moves.
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

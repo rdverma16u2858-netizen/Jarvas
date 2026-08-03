@@ -1,0 +1,105 @@
+# Local full-stack environment: Postgres + Redis + API + web.
+# ---------------------------------------------------------------------------
+# Docker is NOT required to work on this project. Without it the API runs on
+# SQLite and an in-memory cache (see README > Running without Docker), which is
+# enough for everything through Phase 8.
+#
+# Use this when you want to develop against the same Postgres and Redis the
+# production deployment uses, so a query that works locally cannot fail in
+# production on a dialect difference.
+#
+#   docker compose up -d          start everything in the background
+#   docker compose logs -f api    follow the API logs
+#   docker compose down           stop (data survives)
+#   docker compose down -v        stop and DELETE the database volume
+
+services:
+  # --- Postgres ------------------------------------------------------------
+  db:
+    image: postgres:17-alpine
+    container_name: mathbot-db
+    environment:
+      POSTGRES_USER: mathbot
+      POSTGRES_PASSWORD: mathbot
+      POSTGRES_DB: mathbot
+    ports:
+      # Exposed on 5433, not 5432, so this cannot collide with a Postgres
+      # already installed on the host.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `depends_on: condition: service_healthy` uses this. Without it the API
+      # starts while Postgres is still initialising and crashes on first query.
+      test: ["CMD-SHELL", "pg_isready -U mathbot -d mathbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Redis ---------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: mathbot-redis
+    ports:
+      - "6380:6379" # 6380 for the same anti-collision reason
+    # Cache contents are disposable, so persistence is off: no fsync pauses,
+    # and a restart simply starts cold.
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- FastAPI backend -----------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mathbot-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Hostnames are the SERVICE names above, not localhost — inside the
+      # compose network `db` resolves to the Postgres container. Ports are the
+      # internal ones (5432/6379), not the remapped host ports.
+      DATABASE_URL: postgresql+asyncpg://mathbot:mathbot@db:5432/mathbot
+      REDIS_URL: redis://redis:6379/0
+      ENV: local
+      CORS_ORIGINS: '["http://localhost:3000"]'
+      # Read from the host environment or the .env file; never hardcoded here.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Live-reload: edits on the host appear in the container immediately.
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # --- Next.js frontend ----------------------------------------------------
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mathbot-web
+    ports:
+      - "3000:3000"
+    environment:
+      # localhost, not `api` — this URL is used by the BROWSER, which resolves
+      # names on the host, not inside the compose network. Using `api` here is
+      # a classic mistake that produces an unexplained network error in the UI.
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume so the container's node_modules (built for Linux) is
+      # not shadowed by the host's (built for Windows).
+      - /app/node_modules
+    command: npm run dev
+
+volumes:
+  pgdata:

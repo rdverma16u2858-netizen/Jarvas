@@ -1,0 +1,94 @@
+/*
+ * Global styles and the design tokens the whole UI reads from.
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * TAILWIND V4 NOTE
+ *   v4 replaced the JavaScript config file with CSS. `@import "tailwindcss"`
+ *   pulls the framework in, and `@theme` declares tokens that become utility
+ *   classes automatically — `--color-ink` gives you `bg-ink`, `text-ink`,
+ *   `border-ink`. There is no tailwind.config.js in this project, and that is
+ *   correct, not an omission.
+ *
+ * WHY DEFINE TOKENS AT ALL
+ *   Mathematics is dense to read. Fixing the palette, spacing and type scale
+ *   once means every later screen — solutions, quizzes, progress — is
+ *   consistent without re-deciding, and dark mode is one variable block
+ *   rather than a per-component chore.
+ */
+
+@import "tailwindcss";
+
+/* KaTeX's stylesheet. Required - without it every rendered expression falls
+   back to unstyled spans and the mathematics is unreadable. */
+@import "katex/dist/katex.min.css";
+
+@theme {
+  /* Surfaces: near-black rather than pure black, which is harsh on an OLED
+     phone at night and crushes the shadows between panels. */
+  --color-ink: #0b0d12;
+  --color-slate: #151922;
+  --color-line: #242a36;
+
+  /* Accent: indigo reads as "study tool" rather than "alert", and stays
+     distinguishable from the red/green used for wrong/right answers. */
+  --color-accent: #6366f1;
+  --color-accent-soft: #818cf8;
+
+  /* Verification states. These carry real meaning in this product: an answer
+     SymPy confirmed looks different from one it could not check. */
+  --color-verified: #34d399;
+  --color-unverified: #fbbf24;
+  --color-wrong: #f87171;
+
+  /* Text */
+  --color-paper: #f8fafc;
+  --color-muted: #94a3b8;
+
+  /* A serif for mathematical prose is deliberate — it distinguishes the
+     tutor's explanation from UI chrome, the way a textbook does. */
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+}
+
+html {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+/* Long solutions are read top to bottom; a comfortable measure and line
+   height matter more here than in a typical dashboard. */
+.prose-math {
+  line-height: 1.75;
+  max-width: 68ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* KaTeX inherits the surrounding colour rather than forcing black, so the
+   same markup works in dark and light. */
+.katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+/* Display equations can be wider than a phone. Scroll them individually
+   rather than letting one long formula scroll the whole page sideways. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
