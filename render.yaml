@@ -1,0 +1,85 @@
+# Render blueprint — the backend and its database.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# In Render: New -> Blueprint -> pick this repository. It reads this file and
+# creates both services with the settings below, instead of you filling in a
+# dozen fields by hand and getting one of them subtly wrong.
+#
+# THE FRONTEND IS NOT HERE
+#   It goes on Netlify. Render would host it perfectly well, but a static
+#   site on a CDN is faster and free forever, whereas a second Render service
+#   would spin down with the first.
+#
+# WHAT YOU STILL HAVE TO TYPE
+#   The three values marked `sync: false` below. Render prompts for them on
+#   first deploy and never stores them in the repository — which is the point.
+
+services:
+  - type: web
+    name: mathbot-api
+    runtime: docker
+
+    # The Dockerfile lives under backend/, not at the repository root, and the
+    # build context must be backend/ too — the image copies requirements.txt
+    # and app/ from the context root.
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+
+    plan: free
+    region: ohio
+
+    # Checks no dependencies on purpose. A database blip should not convince
+    # Render the app is dead and restart it into a worse state.
+    healthCheckPath: /api/v1/health/live
+
+    envVars:
+      # ── set by Render, wired automatically ────────────────────────────
+      # Render creates the database below and injects its connection string.
+      # `fromDatabase` means you never copy a password by hand.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mathbot-db
+          property: connectionString
+
+      # ── you type these once, at first deploy ──────────────────────────
+      # Never committed. `sync: false` is what makes Render prompt.
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # The app REFUSES TO START in production without this. That is
+      # deliberate — a public URL with no password exposes your API quota and
+      # your saved history to anyone who finds it.
+      - key: AUTH_PASSWORD
+        sync: false
+
+      # Your Netlify origin, e.g. ["https://mathbot-jt.netlify.app"]
+      # JSON array, with the scheme, no trailing slash. Wrong here and every
+      # request from the site fails with an opaque CORS error.
+      - key: CORS_ORIGINS
+        sync: false
+
+      # ── fixed ─────────────────────────────────────────────────────────
+      - key: ENV
+        value: production
+
+      - key: LLM_PROVIDER
+        value: gemini
+
+      # Render terminates TLS at its own proxy, so the socket address is the
+      # proxy for every request. Without this the rate limiter puts all
+      # visitors in one bucket.
+      - key: TRUST_PROXY_HEADER
+        value: "true"
+
+      # Left empty: the free plan has no Redis, so the app falls back to an
+      # in-process cache. It works — the cache is per-instance rather than
+      # shared, which only matters once there is more than one instance.
+      - key: REDIS_URL
+        value: ""
+
+databases:
+  - name: mathbot-db
+    plan: free
+    region: ohio
+    databaseName: mathbot
+    user: mathbot

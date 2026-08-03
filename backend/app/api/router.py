@@ -17,7 +17,18 @@ HOW A ROUTE'S FULL PATH IS BUILT
 
 from fastapi import APIRouter
 
-from app.api.routes import health, llm, solve
+from app.api.routes import (
+    auth,
+    conversations,
+    generate,
+    health,
+    llm,
+    ocr,
+    progress,
+    quiz,
+    review,
+    solve,
+)
 
 # Everything mounts under this. The API_PREFIX is added in main.py, not here,
 # so this file has no opinion about versioning.
@@ -26,16 +37,30 @@ api_router = APIRouter()
 # ── Phase 0 ───────────────────────────────────────────────────────────────
 api_router.include_router(health.router)
 
+# ── Access ────────────────────────────────────────────────────────────────
+# Reachable without a token, by necessity — you cannot log in through the gate.
+api_router.include_router(auth.router)
+
 # ── Phase 1 ───────────────────────────────────────────────────────────────
 api_router.include_router(llm.router)
 
 # ── Phase 2 ───────────────────────────────────────────────────────────────
 api_router.include_router(solve.router)
 
-# ── Registered in later phases ────────────────────────────────────────────
-# Phase 4  api_router.include_router(chat.router)       # conversations
-# Phase 5  api_router.include_router(generate.router)   # question generation
-# Phase 6  api_router.include_router(review.router)     # mistake detection
-# Phase 7  api_router.include_router(quiz.router)       # quizzes and mock tests
-# Phase 8  api_router.include_router(progress.router)   # progress tracking
-# Phase 9  api_router.include_router(ocr.router)        # image upload
+# ── Phase 4 ───────────────────────────────────────────────────────────────
+api_router.include_router(conversations.router)
+
+# ── Phase 5 ───────────────────────────────────────────────────────────────
+api_router.include_router(generate.router)
+
+# ── Phase 6 ───────────────────────────────────────────────────────────────
+api_router.include_router(review.router)
+
+# ── Phase 7 ───────────────────────────────────────────────────────────────
+api_router.include_router(quiz.router)
+
+# ── Phase 8 ───────────────────────────────────────────────────────────────
+api_router.include_router(progress.router)
+
+# ── Phase 9 ───────────────────────────────────────────────────────────────
+api_router.include_router(ocr.router)

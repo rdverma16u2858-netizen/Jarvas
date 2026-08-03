@@ -13,7 +13,8 @@
  *   `readStream` function below and is about fifteen lines.
  */
 
-import { API_BASE_URL, ApiError, NetworkError } from "./api";
+import { API_BASE_URL, ApiError, NetworkError, UnauthorizedError } from "./api";
+import { authHeaders, clearToken } from "./auth";
 
 // ── Mirrors of the backend schema (app/math/schema.py) ────────────────────
 
@@ -73,7 +74,18 @@ export interface SolveResult {
 export type SolveEvent =
   | { type: "stage"; stage: "solving" | "verifying"; message: string }
   | { type: "delta"; text: string }
-  | { type: "result"; verified: boolean; solution: Solution; verdict: Verdict; total_ms: number }
+  | {
+      type: "result";
+      verified: boolean;
+      solution: Solution;
+      verdict: Verdict;
+      total_ms: number;
+      // Present when the turn was saved. The ids ride along with the result
+      // so the UI can offer "bookmark this" immediately, without a second
+      // request to find out what it just created.
+      conversation_id?: number;
+      turn_id?: number;
+    }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -83,20 +95,41 @@ export type SolveEvent =
  * An async generator rather than a callback: the caller writes a plain
  * `for await` loop, and cancelling is just breaking out of it.
  *
- * @param signal AbortSignal — lets the UI cancel a solve in flight. Worth
- *               having when a deep-tier request can run 35 seconds and the
- *               student changes their mind.
+ * @param conversationId Continue an existing thread, so a follow-up question
+ *                       ("now do it from 0 to infinity") has an antecedent.
+ *                       Omit to start a new one — the backend creates it.
+ * @param save           False solves without recording anything in history.
+ * @param signal         AbortSignal — lets the UI cancel a solve in flight.
+ *                       Worth having when a deep-tier request can run 35
+ *                       seconds and the student changes their mind.
  */
 export async function* streamSolve(
   problem: string,
-  { tier = "balanced", signal }: { tier?: Tier; signal?: AbortSignal } = {},
+  {
+    tier = "balanced",
+    conversationId,
+    save = true,
+    signal,
+  }: {
+    tier?: Tier;
+    conversationId?: number | null;
+    save?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ): AsyncGenerator<SolveEvent> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}/solve/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ problem, tier }),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        problem,
+        tier,
+        save,
+        // null and undefined both mean "start a new thread"; the backend
+        // field is Optional[int], so null is the value it expects.
+        conversation_id: conversationId ?? null,
+      }),
       signal,
     });
   } catch (cause) {
@@ -109,6 +142,11 @@ export async function* streamSolve(
   // A failure BEFORE streaming begins still arrives as a normal HTTP error,
   // so it is handled here. Failures DURING the stream arrive as an `error`
   // event instead — the status line is already sent by then and cannot change.
+  if (response.status === 401) {
+    clearToken();
+    throw new UnauthorizedError();
+  }
+
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try {

@@ -92,3 +92,106 @@ body {
   overflow-y: hidden;
   padding: 0.25rem 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PRINT / SAVE AS PDF
+
+   WHY THE PALETTE IS INVERTED RATHER THAN PRINTED AS-IS
+     The screen theme is near-black. Printed unchanged it is either a page of
+     solid ink — expensive, slow, and unreadable on anything but a good
+     printer — or, once the browser's "background graphics" default strips the
+     fills, near-white text on white paper. Neither is usable, so print gets
+     its own palette rather than inheriting one built for a lit screen.
+
+   WHY window.print() RATHER THAN A PDF LIBRARY
+     KaTeX has already laid the mathematics out as styled HTML. Printing that
+     keeps it as vector text — sharp, selectable, searchable. Rasterising it
+     through a canvas library would blur the one thing on the page that most
+     needs to be legible, and add a large dependency to do it.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media print {
+  /* Redeclare the tokens rather than overriding every rule that used them:
+     one block re-colours the entire component tree for paper. */
+  :root {
+    --color-ink: #ffffff;
+    --color-slate: #ffffff;
+    --color-line: #d4d4d8;
+    --color-paper: #111111;
+    --color-muted: #52525b;
+    --color-accent: #3730a3;
+    --color-accent-soft: #4338ca;
+    /* Kept distinguishable in colour, but dark enough to survive a
+       greyscale printer, where a pale green tick would vanish. */
+    --color-verified: #15803d;
+    --color-unverified: #a16207;
+    --color-wrong: #b91c1c;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  /* Chrome that means nothing on paper: buttons, inputs, the sidebar, the
+     composer, anything marked no-print. */
+  .no-print,
+  aside,
+  nav,
+  button,
+  textarea,
+  input,
+  select {
+    display: none !important;
+  }
+
+  /* Printing ONE card: hide everything that is neither the target, an
+     ancestor of it, nor inside it.
+       :has(.print-me)  an ancestor — walks the chain without threading a
+                        class through every wrapper by hand
+       .print-me *      the card's own contents
+
+     All three exclusions live in this one rule on purpose. The obvious
+     alternative — hide broadly, then re-show the card's children — does NOT
+     work: `:not(.print-me)` carries the specificity of `.print-me`, so the
+     hide rule scores higher than any plain `.print-me *` revert and wins even
+     against `!important`. That printed an empty card, which looked like a
+     rendering failure rather than a cascade mistake. */
+  .printing-one body *:not(.print-me):not(:has(.print-me)):not(.print-me *) {
+    display: none !important;
+  }
+  .printing-one .print-me {
+    border: none !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+  }
+  /* Restore the elements the blanket rule above would otherwise hide inside
+     the card itself. */
+  .printing-one .print-me .no-print,
+  .printing-one .print-me button {
+    display: none !important;
+  }
+
+  /* Keep a step and its justification together; a page break between an
+     expression and the reason for it makes both useless. */
+  li,
+  section,
+  article {
+    break-inside: avoid;
+  }
+
+  /* On screen a long formula scrolls sideways. On paper there is nothing to
+     scroll, so it must wrap instead of being silently cut off at the margin. */
+  .katex-display {
+    overflow: visible !important;
+  }
+
+  a[href]::after {
+    content: "";
+  }
+
+  @page {
+    margin: 16mm;
+  }
+}

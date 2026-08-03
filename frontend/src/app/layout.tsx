@@ -17,6 +17,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+import { AuthGate } from "@/components/AuthGate";
+
 /**
  * Page metadata. Next.js turns this into <title>, <meta> and Open Graph tags,
  * so no hand-written <head> is needed.
@@ -51,7 +53,12 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {/* Wraps every page, so a route added later is gated without anyone
+            remembering to gate it — the same closed-by-default rule the
+            backend middleware follows. */}
+        <AuthGate>{children}</AuthGate>
+      </body>
     </html>
   );
 }

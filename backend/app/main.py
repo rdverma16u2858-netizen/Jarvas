@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.cache.client import cache
+from app.core import auth
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine
@@ -55,6 +56,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.ENV,
         settings.database_kind,
     )
+
+    # Before anything else. In production with no password set this raises and
+    # the app does not start — the accident it prevents (deploying publicly
+    # with the door open) is silent, and a server that refuses to boot is not.
+    auth.require_configured()
+    logger.info(
+        "access: %s",
+        "password required"
+        if auth.enabled()
+        else "OPEN — no AUTH_PASSWORD set (fine on localhost, never in public)",
+    )
+
     cache.init()
 
     # Build the LLM provider now so a missing key or an unknown provider name
@@ -107,6 +120,51 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ── Access ────────────────────────────────────────────────────────────
+    # Everything is closed by default and opened by exception. The reverse —
+    # listing what to protect — means every route added later is public until
+    # someone remembers, which is precisely how this kind of gate fails.
+    #
+    # The open paths, and why each one has to be:
+    #   /auth/*   you cannot log in through the login gate
+    #   /health   uptime monitors and container health checks are unauthenticated
+    #   /         the landing response, which reveals only the app name
+    open_prefixes = (
+        f"{settings.API_PREFIX}/auth",
+        f"{settings.API_PREFIX}/health",
+    )
+
+    @app.middleware("http")
+    async def require_password(request: Request, call_next):
+        if not auth.enabled():
+            return await call_next(request)
+
+        path = request.url.path
+
+        # CORS preflight carries no Authorization header by design — the
+        # browser sends it before the real request to ask whether that request
+        # is allowed. Rejecting it here would make every cross-origin call fail
+        # with an opaque CORS error rather than a 401 the client can act on.
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        if path == "/" or path.startswith(open_prefixes):
+            return await call_next(request)
+
+        try:
+            auth.verify_token(auth.token_from_header(request.headers.get("authorization")))
+        except auth.AuthError as exc:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "unauthorized", "message": str(exc)},
+                # Tells the client this is a sign-in problem rather than a
+                # broken request, so it can show the login screen instead of
+                # an error.
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return await call_next(request)
 
     # ── Routes ────────────────────────────────────────────────────────────
     app.include_router(api_router, prefix=settings.API_PREFIX)

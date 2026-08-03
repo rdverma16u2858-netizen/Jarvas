@@ -13,17 +13,21 @@ needs it to decide between showing a green tick and showing a warning.
 
 import json
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.ratelimit import llm_rate_limit
+from app.db.session import get_db
 from app.llm.base import ModelTier
 from app.llm.errors import ConfigurationError, RateLimitError
 from app.llm.factory import get_provider
 from app.math.schema import Solution
 from app.math.solver import Solver, SolverError, StreamingSolver
 from app.math.verifier import VerdictKind
+from app.services.conversations import ConversationService
 
 logger = get_logger(__name__)
 
@@ -48,6 +52,17 @@ class SolveRequest(BaseModel):
     use_cache: bool = Field(
         default=True,
         description="False forces a fresh solve, spending quota",
+    )
+    conversation_id: int | None = Field(
+        default=None,
+        description=(
+            "Continue an existing thread, so follow-up questions can refer to "
+            "earlier ones. Omit to start a new thread."
+        ),
+    )
+    save: bool = Field(
+        default=True,
+        description="False solves without recording anything in history",
     )
 
 
@@ -84,10 +99,17 @@ class SolveResponse(BaseModel):
         description="One entry per try. More than one means the first was refuted and retried."
     )
     total_ms: float
+    conversation_id: int | None = Field(
+        default=None, description="The thread this was saved to"
+    )
+    turn_id: int | None = Field(
+        default=None, description="Use this to bookmark or annotate the turn"
+    )
 
 
 @router.post(
     "",
+    dependencies=[Depends(llm_rate_limit)],
     response_model=SolveResponse,
     summary="Solve a problem and verify the answer",
     responses={
@@ -96,7 +118,7 @@ class SolveResponse(BaseModel):
         503: {"description": "No LLM provider configured"},
     },
 )
-async def solve(request: SolveRequest) -> SolveResponse:
+async def solve(request: SolveRequest, db: AsyncSession = Depends(get_db)) -> SolveResponse:
     """Solve, verify, and retry once if the verification fails."""
     try:
         provider = get_provider()
@@ -105,9 +127,21 @@ async def solve(request: SolveRequest) -> SolveResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
 
+    service = ConversationService(db)
+
+    # Replay earlier turns so a follow-up question has something to refer to.
+    context = (
+        await service.context_messages(request.conversation_id)
+        if request.conversation_id
+        else None
+    )
+
     try:
         result = await Solver(provider).solve(
-            request.problem, tier=request.tier, use_cache=request.use_cache
+            request.problem,
+            tier=request.tier,
+            use_cache=request.use_cache,
+            context=context,
         )
     except RateLimitError as exc:
         headers = {"Retry-After": str(int(exc.retry_after))} if exc.retry_after else None
@@ -124,10 +158,36 @@ async def solve(request: SolveRequest) -> SolveResponse:
         logger.exception("solve failed")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    conversation_id: int | None = request.conversation_id
+    turn_id: int | None = None
+
+    if request.save:
+        # Persisted AFTER verification, so history never contains an answer
+        # that was never checked. A failed save must not lose the solution the
+        # student is waiting for, so it is logged rather than raised.
+        try:
+            turn = await service.add_turn(
+                conversation_id=request.conversation_id,
+                problem=request.problem,
+                solution=result.solution.model_dump(mode="json"),
+                verdict=result.verdict.__dict__ | {"kind": result.verdict.kind.value},
+                verified=result.verified,
+                model=result.attempts[-1].model if result.attempts else "",
+                tier=request.tier.value,
+                latency_ms=result.total_ms,
+            )
+            await db.commit()
+            conversation_id, turn_id = turn.conversation_id, turn.id
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to save the turn - returning it unsaved")
+            await db.rollback()
+
     return SolveResponse(
         verified=result.verified,
         solution=result.solution,
         verdict=VerdictResponse(**result.verdict.__dict__),
+        conversation_id=conversation_id,
+        turn_id=turn_id,
         attempts=[
             AttemptSummary(
                 model=a.model,
@@ -143,10 +203,13 @@ async def solve(request: SolveRequest) -> SolveResponse:
 
 @router.post(
     "/stream",
+    dependencies=[Depends(llm_rate_limit)],
     summary="Solve with live progress (Server-Sent Events)",
     response_class=StreamingResponse,
 )
-async def solve_stream(request: SolveRequest) -> StreamingResponse:
+async def solve_stream(
+    request: SolveRequest, db: AsyncSession = Depends(get_db)
+) -> StreamingResponse:
     """Stream the solve as it happens, as Server-Sent Events.
 
     WHY SSE RATHER THAN A WEBSOCKET
@@ -182,12 +245,44 @@ async def solve_stream(request: SolveRequest) -> StreamingResponse:
         """
         return f"data: {json.dumps(body)}\n\n"
 
+    service = ConversationService(db)
+    context = (
+        await service.context_messages(request.conversation_id)
+        if request.conversation_id
+        else None
+    )
+
     async def events():
         solver = StreamingSolver(provider)
         try:
-            async for event in solver.solve_stream(request.problem, tier=request.tier):
+            async for event in solver.solve_stream(
+                request.problem, tier=request.tier, context=context
+            ):
                 if event.type == "result":
-                    yield sse({"type": "result", **(event.payload or {})})
+                    payload = dict(event.payload or {})
+
+                    # Save before emitting, so the ids travel with the result
+                    # and the client never has to make a second request to
+                    # learn what it can bookmark.
+                    if request.save:
+                        try:
+                            turn = await service.add_turn(
+                                conversation_id=request.conversation_id,
+                                problem=request.problem,
+                                solution=payload["solution"],
+                                verdict=payload["verdict"],
+                                verified=payload["verified"],
+                                tier=request.tier.value,
+                                latency_ms=payload.get("total_ms", 0.0),
+                            )
+                            await db.commit()
+                            payload["conversation_id"] = turn.conversation_id
+                            payload["turn_id"] = turn.id
+                        except Exception:  # noqa: BLE001
+                            logger.exception("failed to save the streamed turn")
+                            await db.rollback()
+
+                    yield sse({"type": "result", **payload})
                 elif event.type == "delta":
                     yield sse({"type": "delta", "text": event.text})
                 elif event.type == "stage":

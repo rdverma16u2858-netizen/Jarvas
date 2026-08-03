@@ -107,10 +107,21 @@ class GeminiProvider(LLMProvider):
                 # than silently dropping them.
                 system_parts.append(m.content)
                 continue
+
+            # Images BEFORE the text. Gemini's guidance for a single image is
+            # to put it first, and it reads noticeably better when the
+            # instruction follows the thing it refers to.
+            parts: list[dict[str, Any]] = [
+                {"inlineData": {"mimeType": image.mime_type, "data": image.data}}
+                for image in m.images
+            ]
+            if m.content:
+                parts.append({"text": m.content})
+
             contents.append(
                 {
                     "role": "model" if m.role == "assistant" else "user",
-                    "parts": [{"text": m.content}],
+                    "parts": parts,
                 }
             )
 

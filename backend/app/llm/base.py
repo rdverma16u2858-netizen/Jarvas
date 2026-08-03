@@ -70,6 +70,27 @@ class ModelTier(str, Enum):
 
 
 @dataclass(frozen=True)
+class ImagePart:
+    """An image attached to a message, for the multimodal path.
+
+    `data` is base64 WITHOUT a data: URI prefix — providers want the raw
+    payload and the prefix is a client-side transport convention.
+    """
+
+    mime_type: str
+    data: str
+
+    def fingerprint(self) -> str:
+        """A short digest standing in for the image in the cache key.
+
+        Base64 of a photograph runs to hundreds of kilobytes. Putting that in
+        the key would mean serialising and hashing the whole image on every
+        call, including the ones that skip the cache entirely.
+        """
+        return hashlib.sha256(self.data.encode("ascii", "ignore")).hexdigest()[:32]
+
+
+@dataclass(frozen=True)
 class Message:
     """One turn in a conversation.
 
@@ -79,6 +100,10 @@ class Message:
 
     role: Role
     content: str
+    #: Images sent alongside the text. Providers that cannot accept them
+    #: ignore the field rather than failing, so a text-only provider stays
+    #: usable for every other call.
+    images: tuple[ImagePart, ...] = ()
 
 
 @dataclass
@@ -316,7 +341,18 @@ class LLMProvider(ABC):
                 "system": system,
                 "max_tokens": max_tokens,
                 "schema": json_schema,
-                "messages": [{"role": m.role, "content": m.content} for m in messages],
+                # Images enter the key as short digests, not as their base64.
+                # Two photographs of the same problem are different requests,
+                # so they must not collide — but hashing megabytes of payload
+                # on every call to say so would be absurd.
+                "messages": [
+                    {
+                        "role": m.role,
+                        "content": m.content,
+                        "images": [i.fingerprint() for i in m.images],
+                    }
+                    for m in messages
+                ],
             },
             sort_keys=True,
             ensure_ascii=False,

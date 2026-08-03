@@ -45,6 +45,29 @@ from app.math.verifier import Verdict, VerdictKind, verify
 logger = get_logger(__name__)
 
 
+def _with_context(problem: str, context: list[tuple[str, str]] | None) -> list[Message]:
+    """Build the message list, replaying earlier turns as conversation.
+
+    Prior turns become real user/assistant turns rather than being pasted into
+    one prompt. That is what lets a follow-up like "now do it from 0 to
+    infinity" resolve — the model sees an actual exchange, not a transcript
+    quoted at it.
+
+    Only the problem and the final answer are replayed, never the full
+    solution JSON: a six-turn thread of complete solutions would run to tens
+    of thousands of tokens and, on a free tier, exhaust the request long
+    before it exhausted the context window.
+    """
+    messages: list[Message] = []
+    for prior_problem, prior_answer in context or []:
+        messages.append(Message(role="user", content=prior_problem))
+        messages.append(
+            Message(role="assistant", content=prior_answer or "(no answer recorded)")
+        )
+    messages.append(Message(role="user", content=problem))
+    return messages
+
+
 @dataclass
 class Attempt:
     """One pass through the loop. Kept so the retry is visible, not hidden."""
@@ -91,6 +114,7 @@ class Solver:
         tier: ModelTier = ModelTier.BALANCED,
         max_attempts: int = 2,
         use_cache: bool = True,
+        context: list[tuple[str, str]] | None = None,
     ) -> SolveResult:
         """Solve `problem`, verify it, and retry once if the check fails.
 
@@ -100,7 +124,7 @@ class Solver:
         """
         started = time.perf_counter()
         attempts: list[Attempt] = []
-        messages: list[Message] = [Message(role="user", content=problem)]
+        messages: list[Message] = _with_context(problem, context)
         system = SOLVER_SYSTEM
 
         for attempt_no in range(1, max_attempts + 1):
@@ -164,7 +188,7 @@ class Solver:
                 # Feed the computed value back. Being told "you said X, the
                 # correct value is Y" is far more effective than "try again".
                 messages = [
-                    Message(role="user", content=problem),
+                    *_with_context(problem, context),
                     Message(role="assistant", content=response.text),
                     Message(
                         role="user",
@@ -235,6 +259,7 @@ class StreamingSolver(Solver):
         problem: str,
         *,
         tier: ModelTier = ModelTier.BALANCED,
+        context: list[tuple[str, str]] | None = None,
     ):
         """Yield SolveEvents through the solve-and-verify pipeline.
 
@@ -247,7 +272,7 @@ class StreamingSolver(Solver):
         wait genuinely gets longer and silence would look like a stall.
         """
         started = time.perf_counter()
-        messages: list[Message] = [Message(role="user", content=problem)]
+        messages: list[Message] = _with_context(problem, context)
         solution: Solution | None = None
         verdict: Verdict | None = None
 
@@ -306,7 +331,7 @@ class StreamingSolver(Solver):
                 break
 
             messages = [
-                Message(role="user", content=problem),
+                *_with_context(problem, context),
                 Message(role="assistant", content=raw),
                 Message(
                     role="user",

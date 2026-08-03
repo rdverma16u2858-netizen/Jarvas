@@ -1,0 +1,82 @@
+# Production overrides.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# WHY AN OVERRIDE RATHER THAN A SECOND FULL FILE
+#   The services, network and volume wiring are identical; only the things
+#   that make development pleasant and production wrong are different. A
+#   second complete file would duplicate all of it and drift the moment either
+#   is edited.
+#
+# WHAT THIS ACTUALLY CHANGES, AND WHY EACH ONE MATTERS
+#   · No bind mounts. The dev file mounts the source over the image so edits
+#     appear live; in production that means the running code is whatever is on
+#     the host disk rather than what was built and tested.
+#   · No --reload. The reloader watches the filesystem and runs a supervisor
+#     process; both are pure overhead when nothing changes.
+#   · ENV=production. This is what closes /docs, /redoc and /openapi.json and
+#     stops tracebacks being returned in error responses — see main.py.
+#   · A real build of the frontend. `npm run dev` is an unoptimised compiler
+#     serving source maps.
+#   · Ports bound to localhost. The containers should sit behind a reverse
+#     proxy that terminates TLS; publishing 8000 on 0.0.0.0 puts the API on
+#     the public internet in plaintext.
+#
+# REQUIRES DOCKER COMPOSE v2.24 OR NEWER
+#   The `!override` tags below need it. Compose MERGES sequences across files
+#   by default, so a plain `ports: []` would append to the base list rather
+#   than clear it — leaving the dev port bindings in place in production,
+#   silently. On an older Compose this file fails to parse, which is the
+#   better of the two failures. Check with `docker compose version`.
+#
+# STILL REQUIRED OUTSIDE THIS FILE
+#   A reverse proxy (Caddy, nginx, Traefik) for TLS, and TRUST_PROXY_HEADER=true
+#   so rate limiting sees real client addresses rather than the proxy's.
+#   See DEPLOY.md.
+
+services:
+  db:
+    # Not published at all in production. The API reaches it over the compose
+    # network; exposing Postgres to the host is a habit worth not having.
+    ports: !override []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    restart: unless-stopped
+
+  redis:
+    ports: !override []
+    restart: unless-stopped
+
+  api:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment:
+      ENV: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://mathbot:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/mathbot
+      REDIS_URL: redis://redis:6379/0
+      # The browser's origin, not the API's. Wrong here means every request
+      # from the site fails with an opaque CORS error.
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to your site origin, e.g. ["https://mathbot.example.com"]}
+      # Only turn this on when a proxy really is in front — it makes the app
+      # trust a client-supplied header for rate-limit identity.
+      TRUST_PROXY_HEADER: ${TRUST_PROXY_HEADER:-true}
+    # Source is baked into the image, not mounted from the host.
+    volumes: !override []
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    restart: unless-stopped
+
+  web:
+    ports: !override
+      - "127.0.0.1:3000:3000"
+    environment:
+      # Inlined at BUILD time by Next.js, so this must be set before the image
+      # is built — changing it later needs a rebuild, not a restart.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL, e.g. https://mathbot.example.com/api/v1}
+      NODE_ENV: production
+    volumes: !override []
+    command: sh -c "npm run build && npm run start"
+    restart: unless-stopped

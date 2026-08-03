@@ -46,12 +46,26 @@ RUN useradd --create-home --shell /bin/bash mathbot \
     && chown -R mathbot:mathbot /app
 USER mathbot
 
+# Documentation only — the actual port comes from $PORT at runtime.
 EXPOSE 8000
 
 # Lets Docker and orchestrators see the app is alive. Hits /health/live, which
 # checks no dependencies — a database blip must not cause a container restart.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/live').status==200 else 1)"
+    CMD python -c "import os,urllib.request,sys; p=os.environ.get('PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://localhost:{p}/api/v1/health/live').status==200 else 1)"
 
+# Shell form, NOT exec form, for two reasons:
+#
+#   $PORT   Render, Fly, Cloud Run and Heroku all assign the port at runtime
+#           and expect the app to bind it. A hardcoded 8000 means nothing is
+#           listening where the platform is looking, and the deploy fails its
+#           health check with no error in the app's own logs — it looks like
+#           the app never started. ${PORT:-8000} keeps local Docker working.
+#
+#   migrate A fresh database has no tables. Without this the container comes
+#           up healthy and then fails every request with "relation does not
+#           exist". `alembic upgrade head` is idempotent, so it is safe on
+#           every boot and restart.
+#
 # Overridden by docker-compose in development to add --reload.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -90,3 +90,33 @@ async def test_unknown_route_is_404(client: AsyncClient) -> None:
     """Routes exist only under the API prefix."""
     assert (await client.get("/health")).status_code == 404  # missing /api/v1
     assert (await client.get("/api/v1/nope")).status_code == 404
+
+
+# ── deployment: the database URL a platform actually hands you ─────────────
+
+
+async def test_platform_postgres_urls_are_normalised() -> None:
+    """Render, Heroku, Railway and Fly all inject the bare scheme.
+
+    Rejecting those means the app cannot read the database its own platform
+    just created, and the deploy dies at startup with what looks like a
+    configuration mistake rather than a clash of conventions.
+    """
+    from app.core.config import Settings
+
+    for url in (
+        "postgres://u:p@host:5432/db",
+        "postgresql://u:p@host:5432/db",
+        "postgresql+psycopg2://u:p@host:5432/db",
+    ):
+        assert Settings(DATABASE_URL=url).DATABASE_URL.startswith("postgresql+asyncpg://")
+
+
+async def test_an_unusable_driver_is_still_rejected() -> None:
+    """Normalising the known-good ones must not turn the check into a no-op."""
+    import pytest
+
+    from app.core.config import Settings
+
+    with pytest.raises(Exception, match="async driver"):
+        Settings(DATABASE_URL="mysql://u:p@host/db")

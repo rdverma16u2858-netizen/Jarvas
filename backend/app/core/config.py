@@ -43,6 +43,34 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILES = (_PROJECT_ROOT / ".env", _PROJECT_ROOT / "backend" / ".env")
 
 
+def _anchor_sqlite_path(url: str) -> str:
+    """Resolve a relative SQLite path against the project root, not the CWD.
+
+    WHY THIS EXISTS
+        `sqlite:///./mathbot.db` is relative to whatever directory the process
+        happened to start in. Alembic is normally run from `backend/`, while
+        uvicorn is often started from the repo root — so the migration creates
+        `backend/mathbot.db` and the app then creates and reads an entirely
+        separate, empty `mathbot.db` beside it.
+
+        The symptom is "no such table: conversations" on a project whose
+        migrations demonstrably ran, which sends you looking at Alembic
+        instead of at the path. Anchoring the path removes the ambiguity: one
+        database file, wherever either command is launched from.
+
+    Postgres URLs and absolute SQLite paths are returned untouched.
+    """
+    prefix, separator, path = url.partition(":///")
+    if not separator or not prefix.startswith("sqlite"):
+        return url
+
+    # ":memory:" and absolute paths are already unambiguous.
+    if path.startswith(":") or Path(path).is_absolute():
+        return url
+
+    return f"{prefix}:///{(_PROJECT_ROOT / path).resolve().as_posix()}"
+
+
 class Settings(BaseSettings):
     """Every knob the backend has. Read once at startup, then immutable."""
 
@@ -72,6 +100,41 @@ class Settings(BaseSettings):
     # Browsers block cross-origin requests unless the server allows them.
     # The Next.js dev server runs on 3000; the API on 8000 — different origins.
     CORS_ORIGINS: list[str] = Field(default=["http://localhost:3000"])
+
+    # ── Access ────────────────────────────────────────────────────────────
+    # One shared password protecting a one-person study tool from the open
+    # internet. Empty = no auth, which is right on localhost and refused in
+    # production (see app/core/auth.py).
+    #
+    # Setting this is what stands between a public URL and someone else
+    # spending your Gemini quota and reading your history.
+    AUTH_PASSWORD: str = ""
+
+    # Optional. Leave empty and the signing key is derived from the password,
+    # so changing the password invalidates every issued token — usually the
+    # behaviour you want. Set it separately only if you need tokens to survive
+    # a password change.
+    AUTH_SECRET: str = ""
+
+    # ── Rate limiting ─────────────────────────────────────────────────────
+    # These protect the free-tier quota from accident far more than from
+    # abuse: a re-render loop or a double-tapped Generate can spend a day's
+    # allowance in a minute. See app/core/ratelimit.py.
+    RATE_LIMIT_ENABLED: bool = True
+
+    # Model-calling endpoints: solve, generate, review, ocr.
+    # 12/minute is well above any human pace and well below a runaway loop.
+    RATE_LIMIT_LLM_PER_MINUTE: int = 12
+    # The one that actually guards the quota. Gemini's free tier is stricter
+    # than this on some models, so its own 429 stays the real backstop.
+    RATE_LIMIT_LLM_PER_DAY: int = 400
+    # Database-only reads and writes. Generous — these cost a local query.
+    RATE_LIMIT_STANDARD_PER_MINUTE: int = 240
+
+    # Set ONLY when a reverse proxy sits in front, because X-Forwarded-For is
+    # client-supplied and spoofable. Off by default: a limiter that silently
+    # does nothing is worse than none, because it is believed.
+    TRUST_PROXY_HEADER: bool = False
 
     # ── Database ──────────────────────────────────────────────────────────
     # SQLite by default so the app runs with zero setup. Point this at Postgres
@@ -143,20 +206,40 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL")
     @classmethod
     def _must_be_async_driver(cls, v: str) -> str:
-        """Fail loudly at startup rather than mysteriously at query time.
+        """Normalise the driver, then insist it is an async one.
 
         FastAPI's async request handlers need an async database driver. A
-        synchronous URL (`postgresql://...`) blocks the event loop and the app
-        appears to hang with no error — one of the least obvious failures in
-        async Python, so we catch it here.
+        synchronous URL blocks the event loop and the app appears to hang with
+        no error — one of the least obvious failures in async Python.
+
+        BUT hosting platforms hand out the bare scheme. Render, Heroku,
+        Railway and Fly all inject `postgres://` or `postgresql://` with no
+        driver, because that is what every other language expects. Rejecting
+        those means the app cannot read the database its own platform just
+        created for it, and the deploy fails at startup with a validation
+        error that reads like a configuration mistake rather than a mismatch
+        of conventions.
+
+        So the known-good ones are upgraded in place, and anything genuinely
+        unusable still raises.
         """
+        # `postgres://` is the legacy spelling Heroku popularised and Render
+        # still emits; SQLAlchemy 2 dropped support for it entirely.
+        for prefix in ("postgresql+psycopg2://", "postgresql://", "postgres://"):
+            if v.startswith(prefix):
+                v = "postgresql+asyncpg://" + v[len(prefix) :]
+                break
+
+        if v.startswith("sqlite://"):
+            v = "sqlite+aiosqlite://" + v[len("sqlite://") :]
+
         if "+aiosqlite" not in v and "+asyncpg" not in v:
             raise ValueError(
                 f"DATABASE_URL must use an async driver, got: {v!r}\n"
                 "  SQLite:   sqlite+aiosqlite:///./mathbot.db\n"
                 "  Postgres: postgresql+asyncpg://user:pass@localhost:5432/mathbot"
             )
-        return v
+        return _anchor_sqlite_path(v)
 
     @property
     def is_local(self) -> bool:

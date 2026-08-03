@@ -44,6 +44,7 @@ class CacheBackend(Protocol):
     async def get(self, key: str) -> Any | None: ...
     async def set(self, key: str, value: Any, ttl: int | None = None) -> None: ...
     async def delete(self, key: str) -> None: ...
+    async def incr(self, key: str, ttl: int) -> int: ...
     async def ping(self) -> bool: ...
     async def close(self) -> None: ...
 
@@ -77,6 +78,27 @@ class InMemoryCache:
 
     async def delete(self, key: str) -> None:
         self._store.pop(key, None)
+
+    async def incr(self, key: str, ttl: int) -> int:
+        """Increment a counter, setting its expiry on first write.
+
+        The TTL is applied only when the key is created, so a rate-limit
+        window does not slide forward every time it is hit — otherwise a
+        client making steady requests would extend its own window forever and
+        never reset.
+
+        No lock: this runs on the event loop and contains no await between
+        the read and the write, so it cannot be interleaved by another task.
+        """
+        current = await self.get(key)
+        count = int(current or 0) + 1
+        if current is None:
+            self._store[key] = (count, time.time() + ttl)
+        else:
+            # Keep the original expiry.
+            _, expires_at = self._store[key]
+            self._store[key] = (count, expires_at)
+        return count
 
     async def ping(self) -> bool:
         return True  # a dict is always up
@@ -128,6 +150,24 @@ class RedisCache:
 
     async def delete(self, key: str) -> None:
         await self._redis.delete(key)
+
+    async def incr(self, key: str, ttl: int) -> int:
+        """Atomic increment, with the expiry set only on creation.
+
+        INCR and EXPIRE are pipelined into one round trip. Redis INCR is
+        atomic, which is the whole reason the rate limiter counts here rather
+        than with get-then-set: two requests arriving together must produce
+        two, not one.
+
+        EXPIRE uses NX so it applies only when the key has no TTL yet.
+        Refreshing it on every hit would let a steady stream of requests push
+        its own window forward indefinitely and never be limited.
+        """
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, ttl, nx=True)
+            count, _ = await pipe.execute()
+        return int(count)
 
     async def ping(self) -> bool:
         try:
@@ -183,6 +223,10 @@ class Cache:
 
     async def delete(self, key: str) -> None:
         await self._require().delete(key)
+
+    async def incr(self, key: str, ttl: int) -> int:
+        """Atomically increment a counter that expires after `ttl` seconds."""
+        return await self._require().incr(key, ttl)
 
     async def ping(self) -> bool:
         return await self._require().ping()

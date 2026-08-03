@@ -34,6 +34,11 @@ from app.db.base import Base  # noqa: E402
 from app.db.session import SessionFactory, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
+# This import registers the models' tables on Base.metadata. Without it,
+# create_all() builds an empty schema and every database test fails with
+# "no such table" — the same trap as Alembic autogenerate.
+from app.models import Conversation, Turn  # noqa: E402,F401
+
 
 @pytest_asyncio.fixture(scope="function")
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
