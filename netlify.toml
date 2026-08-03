@@ -1,0 +1,66 @@
+# Netlify configuration — the FRONTEND only.
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# THE BACKEND IS NOT HERE AND CANNOT BE
+#   Netlify Functions run JavaScript, TypeScript and Go. There is no Python
+#   runtime, so FastAPI and SymPy have nowhere to execute — and SymPy IS the
+#   product, since it is what verifies every answer.
+#
+#   Even setting that aside: a Balanced solve takes ~15s and a Deep one ~35s
+#   against a 10s function timeout, /solve/stream holds an SSE connection open
+#   for the whole request, and the database needs a disk that survives between
+#   invocations.
+#
+#   The backend goes on Render (see render.yaml). This file is the other half.
+#
+# WHAT NETLIFY IS DOING
+#   Serving a folder of static files. `output: "export"` in next.config.ts
+#   makes Next emit exactly that, so there is no Next.js runtime plugin
+#   involved and nothing to keep in step with Netlify's adapter.
+
+[build]
+  # The repository root holds backend/ and frontend/ side by side, so the
+  # build has to be told which one it lives in.
+  base = "frontend"
+  command = "npm run build"
+  publish = "out"
+
+[build.environment]
+  # Match the local toolchain. Netlify's default Node moves without warning,
+  # and a version bump surfacing as a build failure months later is a bad way
+  # to find out.
+  NODE_VERSION = "20"
+
+# NEXT_PUBLIC_API_URL is deliberately NOT set here.
+#
+# Next inlines it at BUILD time, so it belongs in Netlify's own environment
+# variables (Site settings -> Environment variables) where it can be changed
+# and rebuilt without a commit. Committing it here would also put a URL in the
+# repository that is wrong for every deploy except one.
+#
+#   NEXT_PUBLIC_API_URL = https://mathbot-api.onrender.com/api/v1
+#
+# Note the /api/v1 suffix and no trailing slash.
+
+# Long-lived caching for the hashed build assets. Their filenames change on
+# every build, so they can never go stale.
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Modest hardening. There is no user-generated HTML in this app and no
+# third-party scripts, so these cost nothing and close the obvious gaps.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# NO catch-all redirect to index.html.
+#
+# The usual SPA fallback would shadow the real files: this is a static export,
+# so /practice/ genuinely exists as practice/index.html. A catch-all would
+# serve the chat page for every route and the app would look broken in a way
+# that is hard to trace back to here.
