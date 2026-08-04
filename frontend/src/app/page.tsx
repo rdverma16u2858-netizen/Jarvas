@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Brand } from "@/components/Brand";
 import { Sidebar } from "@/components/Sidebar";
 import { SolutionCard } from "@/components/SolutionCard";
 import { ApiError, IS_LOCAL_API, NetworkError } from "@/lib/api";
@@ -291,8 +292,8 @@ export default function ChatPage() {
             ☰
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-3xl font-bold tracking-tight">MathBot</h1>
-            <p className="mt-1.5 text-sm leading-relaxed text-muted">
+            <Brand />
+            <p className="mt-2 text-sm leading-relaxed text-muted">
               Every answer is recomputed by a computer algebra system before you
               see it. If the check fails, you are told.
             </p>

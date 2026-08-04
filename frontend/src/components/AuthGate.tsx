@@ -24,27 +24,54 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { NetworkError, onUnauthorized } from "@/lib/api";
+import { Brand } from "./Brand";
+import { IS_LOCAL_API, NetworkError, onUnauthorized } from "@/lib/api";
 import { clearToken, fetchAuthStatus, login } from "@/lib/auth";
 
-type Gate = "checking" | "open" | "locked" | "unreachable";
+type Gate = "checking" | "waking" | "open" | "locked" | "unreachable";
+
+/**
+ * How long to keep trying before calling it dead.
+ *
+ * Free hosting spins a container down after ~15 minutes idle, and the first
+ * request afterwards FAILS while it boots — a cold start on this image takes
+ * 30-90 seconds. Giving up on that first failure is wrong: the server is not
+ * broken, it is asleep, and it will answer shortly.
+ *
+ * Without this the app shows "cannot reach the backend" permanently after
+ * every break, which reads as a broken deployment and is the single most
+ * misleading thing it could say.
+ */
+const WAKE_ATTEMPTS = 12;
+const WAKE_INTERVAL_MS = 5000;
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [gate, setGate] = useState<Gate>("checking");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [waited, setWaited] = useState(0);
 
   const check = useCallback(async () => {
-    try {
-      const status = await fetchAuthStatus();
-      setGate(!status.required || status.authenticated ? "open" : "locked");
-    } catch (caught) {
-      // Distinguished from "locked": a backend that is down is a different
-      // problem from a password that is wrong, and telling someone to sign in
-      // when the server is off sends them chasing the wrong thing.
-      setGate(caught instanceof NetworkError ? "unreachable" : "unreachable");
+    for (let attempt = 0; attempt < WAKE_ATTEMPTS; attempt++) {
+      try {
+        const status = await fetchAuthStatus();
+        setGate(!status.required || status.authenticated ? "open" : "locked");
+        return;
+      } catch (caught) {
+        // A NetworkError here is usually a sleeping container rather than a
+        // dead one. Anything else — a malformed response, a 500 — will not
+        // improve by waiting, so it fails immediately.
+        if (!(caught instanceof NetworkError)) {
+          setGate("unreachable");
+          return;
+        }
+        if (attempt === 0) setGate("waking");
+        setWaited((attempt + 1) * (WAKE_INTERVAL_MS / 1000));
+        await new Promise((resolve) => setTimeout(resolve, WAKE_INTERVAL_MS));
+      }
     }
+    setGate("unreachable");
   }, []);
 
   useEffect(() => {
@@ -84,19 +111,46 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // The server is asleep, not broken. Saying so — and showing the wait
+  // advancing — is the difference between "it is coming" and "it is dead".
+  if (gate === "waking") {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
+        <Brand />
+        <div className="mt-6 flex items-center gap-3">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+          </span>
+          <p className="text-sm text-muted">
+            Waking the server… {waited}s
+          </p>
+        </div>
+        <p className="mt-3 text-[13px] leading-relaxed text-muted">
+          Free hosting puts the backend to sleep after a quiet spell. The first
+          visit takes up to a minute and a half to start it again; after that it
+          is quick until the next idle period.
+        </p>
+      </main>
+    );
+  }
+
   if (gate === "unreachable") {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
         <h1 className="font-display text-2xl font-bold tracking-tight">
-          Cannot reach the backend
+          Cannot reach the server
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          The API is not responding. If you are running this locally, start it
-          and then reload.
+          {IS_LOCAL_API
+            ? "The API is not responding. Start it and then reload."
+            : "The API did not come back after a minute of trying. It may still be starting — wait a little and try again."}
         </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-slate p-3 font-mono text-[11px] leading-relaxed text-muted">
-          cd backend{"\n"}python -m uvicorn app.main:app --reload --port 8000
-        </pre>
+        {IS_LOCAL_API && (
+          <pre className="mt-3 overflow-x-auto rounded-lg border border-line bg-slate p-3 font-mono text-[11px] leading-relaxed text-muted">
+            cd backend{"\n"}python -m uvicorn app.main:app --reload --port 8000
+          </pre>
+        )}
         <button
           onClick={() => {
             setGate("checking");
@@ -112,8 +166,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
-      <h1 className="font-display text-3xl font-bold tracking-tight">MathBot</h1>
-      <p className="mt-1.5 text-sm leading-relaxed text-muted">
+      <Brand />
+      <p className="mt-3 text-sm leading-relaxed text-muted">
         This instance is password protected.
       </p>
 

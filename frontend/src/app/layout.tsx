@@ -25,13 +25,14 @@ import { AuthGate } from "@/components/AuthGate";
  */
 export const metadata: Metadata = {
   title: {
-    default: "MathBot — AI Mathematics Tutor",
+    default: "JARVAS — the math bot",
     // Child pages set only their own title; this appends the suffix.
-    template: "%s · MathBot",
+    template: "%s · JARVAS",
   },
   description:
     "Solve advanced mathematics with step-by-step explanations, multiple methods, " +
-    "and every answer verified symbolically before you see it.",
+    "and every answer verified symbolically before you see it. " +
+    "Made by Rudra Verma, founder of Pixelforge.",
 };
 
 /**
