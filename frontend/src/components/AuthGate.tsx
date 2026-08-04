@@ -117,16 +117,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
         <Brand size="lg" />
-        <div className="mt-6 flex items-center gap-3">
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+        <div className="mt-12 flex items-center justify-center gap-3">
+          <span className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-muted opacity-60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-muted" />
           </span>
-          <p className="text-sm text-muted">
-            Waking the server… {waited}s
+          <p className="font-mono text-[11px] tracking-[0.14em] text-muted uppercase">
+            Waking the server · {waited}s
           </p>
         </div>
-        <p className="mt-3 text-[13px] leading-relaxed text-muted">
+        <p className="mx-auto mt-4 max-w-sm text-center text-[13px] leading-relaxed text-muted/70">
           Free hosting puts the backend to sleep after a quiet spell. The first
           visit takes up to a minute and a half to start it again; after that it
           is quick until the next idle period.
@@ -167,13 +167,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
       <Brand size="lg" />
-      <p className="mt-4 text-sm leading-relaxed text-muted">
-        This instance is password protected.
-      </p>
 
-      <form onSubmit={submit} className="mt-6">
+      {/* Generous gap between the mark and the form: on a screen this empty,
+          the space is what makes the wordmark read as a mark rather than as a
+          label attached to the input below it. */}
+      <form onSubmit={submit} className="mx-auto mt-14 w-full max-w-xs">
         <label className="block">
-          <span className="mb-1.5 block font-mono text-[10px] tracking-[0.14em] text-muted uppercase">
+          <span className="mb-2 block text-center font-mono text-[10px] tracking-[0.16em] text-muted/70 uppercase">
             Password
           </span>
           <input
@@ -183,19 +183,25 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={busy}
-            className="w-full rounded-xl border border-line bg-slate px-3.5 py-2.5 text-[15px] text-paper focus:border-accent focus:outline-none disabled:opacity-50"
+            className="w-full rounded-xl border border-line bg-slate px-3.5 py-2.5 text-center text-[15px] tracking-[0.1em] text-paper focus:border-accent focus:outline-none disabled:opacity-50"
           />
         </label>
 
-        {error && <p className="mt-2.5 text-[13px] text-wrong">{error}</p>}
+        {error && (
+          <p className="mt-2.5 text-center text-[13px] text-wrong">{error}</p>
+        )}
 
         <button
           type="submit"
           disabled={busy || !password}
-          className="mt-4 w-full rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-accent-soft disabled:opacity-40"
+          className="mt-3 w-full rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-paper transition-colors hover:bg-accent-soft disabled:opacity-40"
         >
           {busy ? "Checking…" : "Sign in"}
         </button>
+
+        <p className="mt-6 text-center text-[11px] text-muted/50">
+          This instance is password protected.
+        </p>
       </form>
     </main>
   );

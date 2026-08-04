@@ -283,22 +283,26 @@ export default function ChatPage() {
       />
 
       <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 sm:px-6">
-        <header className="flex items-start gap-3 pt-10 pb-6">
+        {/* `relative` with the menu button taken out of flow, so the wordmark
+            is centred on the PAGE rather than on the space left over beside a
+            button that only exists below `lg`. Centring it in a flex row would
+            shift it sideways at one breakpoint and not the other. */}
+        <header className="relative pt-10 pb-6">
           <button
             onClick={() => setSidebarOpen(true)}
             aria-label="Open history"
-            className="mt-1 rounded-lg border border-line px-2.5 py-1.5 text-muted transition-colors hover:text-paper lg:hidden"
+            className="absolute top-9 left-0 rounded-lg border border-line px-2.5 py-1.5 text-muted transition-colors hover:text-paper lg:hidden"
           >
             ☰
           </button>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <Brand />
-            <p className="mt-2 text-sm leading-relaxed text-muted">
+            <p className="mx-auto mt-5 max-w-md text-center text-sm leading-relaxed text-muted">
               Every answer is recomputed by a computer algebra system before you
               see it. If the check fails, you are told.
             </p>
             {title && (
-              <p className="mt-2 truncate font-mono text-[11px] text-muted/70">
+              <p className="mt-3 truncate text-center font-mono text-[11px] text-muted/70">
                 {title}
               </p>
             )}

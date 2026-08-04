@@ -1,5 +1,5 @@
 /**
- * The name, in one place.
+ * The wordmark.
  * ═══════════════════════════════════════════════════════════════════════
  *
  * WHY A COMPONENT RATHER THAN THE TEXT REPEATED
@@ -7,47 +7,83 @@
  *   screen. Three copies drift: one gets renamed, the others do not, and the
  *   app quietly disagrees with itself about what it is called.
  *
- * THE HIERARCHY IS THE WHOLE DESIGN
- *   Three lines competing for attention is not a wordmark, it is a paragraph.
- *   So there is exactly one thing to look at — JARVAS, large and tracked
- *   tight — and everything else recedes hard: the descriptor is small and
- *   grey on the same baseline, and the byline is smaller still, spaced out,
- *   and quiet enough to read as a signature rather than a subtitle.
+ * THE HIERARCHY IS THE DESIGN
+ *   Three lines of similar weight is a paragraph, not a wordmark. Each line
+ *   here steps down hard on all three axes at once — size, weight and colour —
+ *   so the eye lands on JARVAS, then reads down without ever being asked to
+ *   choose what to look at.
+ *
+ *       JARVAS      semibold, large, full-contrast, tightly tracked
+ *       The Math Bot   light, ~1/4 the size, muted, widely tracked
+ *       By Rudra Verma…  smallest, most muted, a credit line
+ *
+ * WHY SANS FOR THE NAME WHEN THE APP'S DISPLAY FACE IS A SERIF
+ *   The serif is for mathematical prose — it distinguishes the tutor's
+ *   explanation from UI chrome, the way a textbook does. A logotype is not
+ *   prose, and the restrained geometric sans is what reads as a modern
+ *   software product rather than a document.
+ *
+ * WHY TIGHT TRACKING ON THE NAME AND WIDE ON THE SUBTITLE
+ *   Negative tracking pulls a short word into a single dense shape, which is
+ *   what makes it read as a mark rather than as text. Positive tracking on the
+ *   line beneath does the opposite — it opens the words out, so the two never
+ *   compete even though they sit close together.
+ *
+ * NO GRADIENT, NO GLOW, NO ANIMATION
+ *   Every one of those would be the most eye-catching thing on a page whose
+ *   actual subject is a verified answer.
  */
 
+const SIZES = {
+  /** Hero: the login and waking screens, where this is the only content. */
+  lg: {
+    name: "text-5xl sm:text-6xl",
+    subtitle: "text-sm sm:text-base",
+    byline: "text-[11px]",
+    gapName: "mt-4 sm:mt-5",
+    gapByline: "mt-5 sm:mt-6",
+  },
+  /** Inline: above the chat, where the app itself is the subject. */
+  md: {
+    name: "text-3xl",
+    subtitle: "text-[13px]",
+    byline: "text-[10px]",
+    gapName: "mt-2.5",
+    gapByline: "mt-3",
+  },
+} as const;
+
 export function Brand({
-  /** `lg` for a landing or login screen, `md` inline above the chat. */
   size = "md",
   className = "",
 }: {
-  size?: "md" | "lg";
+  size?: keyof typeof SIZES;
   className?: string;
 }) {
-  const title =
-    size === "lg"
-      ? "text-5xl sm:text-6xl"
-      : "text-4xl";
+  const s = SIZES[size];
 
   return (
-    <div className={className}>
-      <div className="flex items-baseline gap-2.5">
-        <h1
-          className={`font-display font-bold ${title} leading-none tracking-[-0.03em] text-paper`}
-        >
-          JARVAS
-        </h1>
-        {/* Baseline-aligned, deliberately unemphatic: it describes the thing,
-            it is not part of the name. Matching the title's weight would read
-            as a two-word title. */}
-        <span className="text-[13px] font-normal tracking-normal text-muted">
-          the math bot
-        </span>
-      </div>
+    <div className={`text-center ${className}`}>
+      <h1
+        className={`font-sans ${s.name} font-semibold leading-none tracking-[-0.045em] text-paper`}
+      >
+        JARVAS
+      </h1>
 
-      {/* A signature, not a subtitle. Wide tracking and a small size put it
-          firmly below the name in the reading order. */}
-      <p className="mt-2 font-mono text-[10px] tracking-[0.2em] text-muted/60 uppercase">
-        Rudra Verma · Pixelforge
+      {/* Light weight and open tracking: the product descriptor should feel
+          set rather than shouted, and the contrast in letterfit is what keeps
+          it from reading as a second half of the name. */}
+      <p
+        className={`${s.gapName} ${s.subtitle} font-light tracking-[0.22em] text-muted uppercase`}
+      >
+        The Math Bot
+      </p>
+
+      {/* A credit line. Sentence case rather than uppercase — at this length
+          uppercase turns into a block of texture, and the point is that it
+          recedes. */}
+      <p className={`${s.gapByline} ${s.byline} tracking-[0.04em] text-muted/55`}>
+        By Rudra Verma · Founder of PixelForge
       </p>
     </div>
   );
