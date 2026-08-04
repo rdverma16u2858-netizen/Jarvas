@@ -116,7 +116,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (gate === "waking") {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
-        <Brand />
+        <Brand size="lg" />
         <div className="mt-6 flex items-center gap-3">
           <span className="relative flex h-2 w-2 shrink-0">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
@@ -166,8 +166,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
-      <Brand />
-      <p className="mt-3 text-sm leading-relaxed text-muted">
+      <Brand size="lg" />
+      <p className="mt-4 text-sm leading-relaxed text-muted">
         This instance is password protected.
       </p>
 

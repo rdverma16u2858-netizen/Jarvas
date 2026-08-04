@@ -99,36 +99,84 @@ function announceUnauthorized(): void {
  * @throws {ApiError}     the server answered with a non-2xx status
  * @throws {NetworkError} the server could not be reached
  */
+/**
+ * How long to keep retrying a request that never arrived.
+ *
+ * Free hosting sleeps the container after ~15 minutes idle and the first
+ * request afterwards fails while it boots — measured at 30-90 seconds on this
+ * image. Every page that loads data would otherwise show "cannot reach the
+ * backend" on its first visit after any break, which is what made the app
+ * look permanently broken while the server was merely waking.
+ *
+ * Retrying HERE rather than in each page is the point: quiz, practice,
+ * progress, check and the sidebar all inherit it, and a page added later
+ * inherits it too without anyone remembering to add it.
+ */
+const WAKE_RETRIES = 10;
+const WAKE_DELAY_MS = 4000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        // Attached here, once, rather than at every call site. A route that
-        // forgets it does not fail loudly — it just 401s in a way that looks
-        // like the session expired.
-        ...authHeaders(),
-        ...init?.headers,
-      },
-      // Health checks must never be served from a stale cache — that would
-      // report the API as healthy after it had gone down.
-      cache: "no-store",
-    });
-  } catch (cause) {
-    // A caller-initiated abort is not a network failure. Reporting it as
-    // "the backend is down" would tell the user their server had crashed
-    // when in fact they pressed Cancel.
-    if ((cause as Error)?.name === "AbortError") throw cause;
+  // GET is the only method safe to retry after a 5xx: the request may have
+  // been processed before the error, and re-sending a POST could solve a
+  // problem twice or record a duplicate attempt — both of which cost quota.
+  // A refused CONNECTION is different: nothing arrived, so any method is safe.
+  const method = (init?.method ?? "GET").toUpperCase();
+  const idempotent = method === "GET" || method === "HEAD";
 
-    // fetch only rejects on a genuine network failure, so reaching here means
-    // the server is unreachable rather than unhappy.
-    throw new NetworkError(
-      `Cannot reach the API at ${url}. Is the backend running?`,
-    );
+  let response: Response | null = null;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          // Attached here, once, rather than at every call site. A route that
+          // forgets it does not fail loudly — it just 401s in a way that looks
+          // like the session expired.
+          ...authHeaders(),
+          ...init?.headers,
+        },
+        // Health checks must never be served from a stale cache — that would
+        // report the API as healthy after it had gone down.
+        cache: "no-store",
+      });
+    } catch (cause) {
+      // A caller-initiated abort is not a network failure. Reporting it as
+      // "the backend is down" would tell the user their server had crashed
+      // when in fact they pressed Cancel — and it must never be retried.
+      if ((cause as Error)?.name === "AbortError") throw cause;
+
+      // Nothing reached the server, so retrying is safe for any method.
+      if (attempt < WAKE_RETRIES) {
+        await sleep(WAKE_DELAY_MS);
+        continue;
+      }
+
+      throw new NetworkError(
+        `Cannot reach the API at ${url}. Is the backend running?`,
+      );
+    }
+
+    // A 5xx during a cold start is the container still coming up. Worth
+    // waiting out, but only where re-sending cannot cause a second effect.
+    if (response.status >= 500 && idempotent && attempt < WAKE_RETRIES) {
+      await sleep(WAKE_DELAY_MS);
+      continue;
+    }
+
+    break;
+  }
+
+  // The loop either assigns a response or throws, so this cannot be null —
+  // but TypeScript cannot see that through the retry, and an assertion is
+  // honest about which invariant is being relied on.
+  if (response === null) {
+    throw new NetworkError(`Cannot reach the API at ${url}.`);
   }
 
   if (response.status === 401) {
