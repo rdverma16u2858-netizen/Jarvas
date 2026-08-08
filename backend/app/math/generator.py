@@ -108,7 +108,7 @@ class Generator:
         topic: Topic,
         difficulty: Difficulty,
         question_type: QuestionType,
-        count: int = 5,
+        count: int = 3,
         concepts: str = "",
         avoid: list[str] | None = None,
         tier: ModelTier = ModelTier.FAST,

@@ -56,7 +56,9 @@ class GenerateRequest(BaseModel):
     type: QuestionType = Field(
         default=QuestionType.MULTIPLE_CHOICE, description="One of the 6 question formats"
     )
-    count: int = Field(default=5, ge=1, le=MAX_QUESTIONS)
+    # Keep the default interactive on a free hosted instance. The student can
+    # still explicitly request up to MAX_QUESTIONS when they need a longer set.
+    count: int = Field(default=3, ge=1, le=MAX_QUESTIONS)
     concepts: str = Field(
         default="",
         max_length=500,

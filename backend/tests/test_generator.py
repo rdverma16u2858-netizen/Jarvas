@@ -78,6 +78,16 @@ async def test_generation_uses_the_fast_tier_by_default(client: AsyncClient) -> 
     assert body["model"] == "mock-fast"
 
 
+async def test_generation_defaults_to_a_small_fast_set() -> None:
+    """The opening request should feel interactive on free hosting."""
+    from app.api.routes.generate import GenerateRequest
+
+    assert (
+        GenerateRequest(topic="calculus", difficulty="medium", type="multiple_choice").count
+        == 3
+    )
+
+
 async def test_a_wrong_answer_key_is_rejected(client: AsyncClient) -> None:
     """A question whose answer SymPy contradicts must never reach a student.
 

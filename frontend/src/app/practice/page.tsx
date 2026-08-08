@@ -46,7 +46,9 @@ const DEFAULTS = {
   topic: "integral_calculus",
   difficulty: "jee_advanced",
   type: "multiple_choice",
-  count: 5,
+  // Three verified questions are a useful first set without making the
+  // student wait for five model completions and five symbolic checks.
+  count: 3,
 };
 
 export default function PracticePage() {
