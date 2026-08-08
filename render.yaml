@@ -27,6 +27,11 @@ services:
 
     plan: free
     region: ohio
+    branch: main
+    # Rebuild this API whenever code lands on main. Without an explicit
+    # trigger, an existing Render service can retain a previously disabled
+    # auto-deploy setting and keep serving an old container after Git pushes.
+    autoDeployTrigger: commit
 
     # Checks no dependencies on purpose. A database blip should not convince
     # Render the app is dead and restart it into a worse state.
