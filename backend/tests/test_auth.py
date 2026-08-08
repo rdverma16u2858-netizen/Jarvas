@@ -156,6 +156,27 @@ async def test_a_protected_route_401s_without_a_token(guarded_client) -> None:
     assert response.headers.get("WWW-Authenticate") == "Bearer"
 
 
+async def test_an_auth_401_keeps_cors_headers_for_the_browser(guarded_client) -> None:
+    """A browser must see a 401, not mislabel it as a network failure."""
+    response = await guarded_client.post(
+        "/api/v1/generate",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Content-Type": "application/json",
+        },
+        json={
+            "topic": "calculus",
+            "difficulty": "medium",
+            "type": "multiple_choice",
+            "count": 1,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 async def test_a_token_opens_the_door(guarded_client, locked) -> None:
     token, _ = auth.issue_token()
 

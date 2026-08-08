@@ -109,18 +109,6 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.is_local else None,
     )
 
-    # ── CORS ──────────────────────────────────────────────────────────────
-    # The browser blocks requests from localhost:3000 (Next.js) to
-    # localhost:8000 (this API) unless the API says they are allowed. Without
-    # this, every frontend fetch fails with an opaque CORS error.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     # ── Access ────────────────────────────────────────────────────────────
     # Everything is closed by default and opened by exception. The reverse —
     # listing what to protect — means every route added later is public until
@@ -165,6 +153,19 @@ def create_app() -> FastAPI:
             )
 
         return await call_next(request)
+
+    # CORS MUST be registered after the password middleware. Starlette runs
+    # the most recently added middleware first, which makes CORS the outer
+    # layer and adds the browser-facing headers even to an auth 401. If the
+    # auth response escapes before CORS, the browser hides that perfectly
+    # useful 401 as a generic "Failed to fetch" network error.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ── Routes ────────────────────────────────────────────────────────────
     app.include_router(api_router, prefix=settings.API_PREFIX)
