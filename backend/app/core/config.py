@@ -184,6 +184,12 @@ class Settings(BaseSettings):
     LLM_MODEL_BALANCED: str = "gemini-3.5-flash"
     LLM_MODEL_DEEP: str = "gemini-3.6-flash"
 
+    # When Gemini reports that the chosen model is busy, unavailable, or has
+    # no quota for this key, try these models in order before returning an
+    # error. A host can override this with a JSON list, for example:
+    # LLM_FALLBACK_MODELS=["gemini-3.1-flash-lite-preview"]
+    LLM_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite-preview",)
+
     # ── LLM behaviour ─────────────────────────────────────────────────────
     # Generous: a deep-tier model took 35s on one problem, and thinking-heavy
     # requests legitimately run long. Too low a timeout looks like a hang.

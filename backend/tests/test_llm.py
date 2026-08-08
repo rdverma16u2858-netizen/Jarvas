@@ -294,6 +294,42 @@ async def test_daily_quota_is_flagged_so_retrying_stops() -> None:
     assert caught.value.daily is True
 
 
+async def test_busy_gemini_model_falls_back_without_showing_an_error(monkeypatch) -> None:
+    """A capacity spike on Balanced must not stop a student from studying."""
+    from app.core.config import settings
+
+    provider = _gemini()
+    monkeypatch.setattr(settings, "LLM_MODEL", "")
+    monkeypatch.setattr(settings, "LLM_MODEL_BALANCED", "busy-model")
+    monkeypatch.setattr(settings, "LLM_FALLBACK_MODELS", ("backup-model",))
+    provider._models[ModelTier.BALANCED] = "busy-model"
+
+    calls: list[tuple[str, int | None]] = []
+
+    async def fake_post(path, body, model, *, retries=None):
+        calls.append((model, retries))
+        if model == "busy-model":
+            raise RateLimitError("high demand", provider="gemini", model=model)
+        return {
+            "candidates": [{"content": {"parts": [{"text": "backup answer"}]}}],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2},
+        }
+
+    monkeypatch.setattr(provider, "_post", fake_post)
+
+    response = await provider._complete(
+        [Message(role="user", content="What is an electric field?")],
+        tier=ModelTier.BALANCED,
+        system=None,
+        max_tokens=None,
+        json_schema=None,
+    )
+
+    assert response.text == "backup answer"
+    assert response.model == "backup-model"
+    assert calls == [("busy-model", 0), ("backup-model", 0)]
+
+
 async def test_api_key_never_appears_in_an_error_message() -> None:
     """A key leaked into a log or an HTTP response is a real incident."""
     provider = _gemini()

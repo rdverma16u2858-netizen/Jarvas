@@ -79,6 +79,11 @@ class GeminiProvider(LLMProvider):
         # testing a single model across the whole app without editing tiers.
         return settings.LLM_MODEL or self._models[tier]
 
+    def _models_for_request(self, tier: ModelTier) -> tuple[str, ...]:
+        """Return the selected model followed by unique configured backups."""
+        candidates = (self.model_for(tier), *settings.LLM_FALLBACK_MODELS)
+        return tuple(dict.fromkeys(model.strip() for model in candidates if model.strip()))
+
     # ── request building ──────────────────────────────────────────────────
 
     def _build_body(
@@ -220,7 +225,14 @@ class GeminiProvider(LLMProvider):
 
     # ── the call, with retry ──────────────────────────────────────────────
 
-    async def _post(self, path: str, body: dict[str, Any], model: str) -> dict[str, Any]:
+    async def _post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        model: str,
+        *,
+        retries: int | None = None,
+    ) -> dict[str, Any]:
         """POST with exponential backoff on rate limits and 5xx.
 
         Google's own `retryDelay` is preferred over a computed backoff — it is
@@ -231,7 +243,9 @@ class GeminiProvider(LLMProvider):
         url = f"{BASE_URL}/{path}"
         last: Exception | None = None
 
-        for attempt in range(settings.LLM_MAX_RETRIES + 1):
+        retry_limit = settings.LLM_MAX_RETRIES if retries is None else retries
+
+        for attempt in range(retry_limit + 1):
             try:
                 async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
                     response = await client.post(
@@ -252,7 +266,7 @@ class GeminiProvider(LLMProvider):
                 last = exc
                 if isinstance(exc, RateLimitError) and exc.daily:
                     raise  # a daily quota will not clear by waiting
-                if attempt >= settings.LLM_MAX_RETRIES:
+                if attempt >= retry_limit:
                     raise
 
                 wait = getattr(exc, "retry_after", None) or (2.0**attempt)
@@ -261,7 +275,7 @@ class GeminiProvider(LLMProvider):
                     "gemini %s — retry %d/%d in %.1fs",
                     type(exc).__name__,
                     attempt + 1,
-                    settings.LLM_MAX_RETRIES,
+                    retry_limit,
                     wait,
                 )
                 import asyncio
@@ -270,7 +284,7 @@ class GeminiProvider(LLMProvider):
 
             except httpx.TimeoutException as exc:
                 last = exc
-                if attempt >= settings.LLM_MAX_RETRIES:
+                if attempt >= retry_limit:
                     raise LLMTimeoutError(
                         f"no response in {settings.LLM_TIMEOUT}s",
                         provider=self.name,
@@ -330,11 +344,36 @@ class GeminiProvider(LLMProvider):
         max_tokens: int | None,
         json_schema: dict[str, Any] | None,
     ) -> LLMResponse:
-        model = self.model_for(tier)
         body = self._build_body(
             messages, system=system, max_tokens=max_tokens, json_schema=json_schema
         )
-        payload = await self._post(f"models/{model}:generateContent", body, model)
+        models = self._models_for_request(tier)
+        last_error: RateLimitError | ModelUnavailableError | None = None
+
+        for index, model in enumerate(models):
+            try:
+                # A different available model is more helpful than repeatedly
+                # retrying one overloaded model. With no backup configured,
+                # preserve the regular exponential-backoff behaviour.
+                retries = 0 if len(models) > 1 else None
+                payload = await self._post(
+                    f"models/{model}:generateContent", body, model, retries=retries
+                )
+                break
+            except (RateLimitError, ModelUnavailableError) as exc:
+                last_error = exc
+                if index == len(models) - 1:
+                    raise
+                logger.warning(
+                    "gemini model unavailable; falling back from=%s to=%s reason=%s",
+                    model,
+                    models[index + 1],
+                    type(exc).__name__,
+                )
+        else:  # Defensive: the loop always returns or raises above.
+            raise last_error or ProviderError(
+                "no Gemini models configured", provider=self.name
+            )
 
         text, finish = self._extract_text(payload, model)
         usage = payload.get("usageMetadata", {})
@@ -367,56 +406,77 @@ class GeminiProvider(LLMProvider):
         explanation appear; unstreamed, they stare at a spinner and assume it
         has hung.
 
-        Retry is deliberately NOT applied. Once bytes have been sent to the
-        client, restarting would duplicate the text already displayed.
+        A backup model is tried only when Gemini fails before it sends text.
+        Once bytes have been sent to the client, restarting would duplicate
+        the visible answer.
         """
-        model = self.model_for(tier)
         body = self._build_body(
             messages, system=system, max_tokens=max_tokens, json_schema=json_schema
         )
-        url = f"{BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
+        models = self._models_for_request(tier)
+        last_error: RateLimitError | ModelUnavailableError | None = None
 
-        try:
-            async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    url,
-                    json=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": self._key,
-                    },
-                ) as response:
-                    if response.status_code >= 400:
-                        await response.aread()
-                        self._raise_for_error(response, model)
+        for index, model in enumerate(models):
+            url = f"{BASE_URL}/models/{model}:streamGenerateContent?alt=sse"
+            emitted_text = False
 
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        raw = line[5:].strip()
-                        if not raw or raw == "[DONE]":
-                            continue
-                        try:
-                            chunk = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue  # keep-alive or partial frame
+            try:
+                async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        json=body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "x-goog-api-key": self._key,
+                        },
+                    ) as response:
+                        if response.status_code >= 400:
+                            await response.aread()
+                            self._raise_for_error(response, model)
 
-                        for candidate in chunk.get("candidates", []):
-                            for part in candidate.get("content", {}).get("parts", []):
-                                if text := part.get("text"):
-                                    yield text
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if not raw or raw == "[DONE]":
+                                continue
+                            try:
+                                chunk = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue  # keep-alive or partial frame
 
-        except httpx.TimeoutException as exc:
-            raise LLMTimeoutError(
-                f"stream stalled after {settings.LLM_TIMEOUT}s",
-                provider=self.name,
-                model=model,
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise ProviderError(
-                f"stream failed: {exc}", provider=self.name, model=model
-            ) from exc
+                            for candidate in chunk.get("candidates", []):
+                                for part in candidate.get("content", {}).get("parts", []):
+                                    if text := part.get("text"):
+                                        emitted_text = True
+                                        yield text
+                return
+
+            except (RateLimitError, ModelUnavailableError) as exc:
+                # A restart after text reaches the browser would duplicate the
+                # answer, so only pre-response errors are safe to retry.
+                if emitted_text or index == len(models) - 1:
+                    raise
+                last_error = exc
+                logger.warning(
+                    "gemini stream unavailable; falling back from=%s to=%s reason=%s",
+                    model,
+                    models[index + 1],
+                    type(exc).__name__,
+                )
+            except httpx.TimeoutException as exc:
+                raise LLMTimeoutError(
+                    f"stream stalled after {settings.LLM_TIMEOUT}s",
+                    provider=self.name,
+                    model=model,
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise ProviderError(
+                    f"stream failed: {exc}", provider=self.name, model=model
+                ) from exc
+
+        raise last_error or ProviderError("no Gemini models configured", provider=self.name)
 
     async def check(self) -> ProviderStatus:
         """List models to prove the key is valid and the service reachable.
