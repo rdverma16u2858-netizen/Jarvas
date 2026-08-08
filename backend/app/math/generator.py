@@ -111,7 +111,7 @@ class Generator:
         count: int = 5,
         concepts: str = "",
         avoid: list[str] | None = None,
-        tier: ModelTier = ModelTier.BALANCED,
+        tier: ModelTier = ModelTier.FAST,
         use_cache: bool = True,
     ) -> GenerationResult:
         """Generate `count` questions, then check each answer with SymPy.

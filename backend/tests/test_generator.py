@@ -71,6 +71,13 @@ async def test_generated_answers_are_verified_by_sympy(client: AsyncClient) -> N
     assert all(q["verified"] for q in body["questions"])
 
 
+async def test_generation_uses_the_fast_tier_by_default(client: AsyncClient) -> None:
+    """Practice should stay responsive when the reasoning model is busy."""
+    body = await generate(client)
+
+    assert body["model"] == "mock-fast"
+
+
 async def test_a_wrong_answer_key_is_rejected(client: AsyncClient) -> None:
     """A question whose answer SymPy contradicts must never reach a student.
 

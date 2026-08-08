@@ -62,7 +62,10 @@ class GenerateRequest(BaseModel):
         max_length=500,
         description="Narrow the set, e.g. 'integration by parts, reduction formulas'",
     )
-    tier: ModelTier = Field(default=ModelTier.BALANCED)
+    # Generating a set is structured content creation, not a proof-solving
+    # task. Flash keeps this interactive on free hosting and avoids depending
+    # on the more heavily loaded Balanced model for every Practice request.
+    tier: ModelTier = Field(default=ModelTier.FAST)
     save: bool = Field(default=True, description="False generates without storing")
     avoid_repeats: bool = Field(
         default=True,
