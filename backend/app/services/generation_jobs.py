@@ -19,7 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from app.core.logging import get_logger
+
 JOB_TTL_SECONDS = 15 * 60
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -103,6 +106,7 @@ class GenerationJobs:
         except Exception as exc:  # noqa: BLE001 - background boundary
             # Route code raises HTTPException with a student-safe detail. Do
             # not expose a raw traceback or provider URL here.
+            logger.exception("generation job %s failed", job.id)
             detail = getattr(exc, "detail", None)
             job.error = detail if isinstance(detail, str) else "Could not generate questions."
             job.error_status = int(getattr(exc, "status_code", 502))

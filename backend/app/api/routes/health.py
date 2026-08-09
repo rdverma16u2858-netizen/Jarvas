@@ -47,10 +47,12 @@ async def _check_database(db: AsyncSession) -> ComponentHealth:
     """
     started = time.perf_counter()
     try:
-        await db.execute(text("SELECT 1"))
+        # A socket-level SELECT 1 can be green while the table Practice needs
+        # was never migrated. This confirms the live schema is usable too.
+        await db.execute(text("SELECT 1 FROM practice_questions LIMIT 1"))
         return ComponentHealth(
             status="up",
-            detail=settings.database_kind,
+            detail=f"{settings.database_kind} + practice schema",
             latency_ms=round((time.perf_counter() - started) * 1000, 2),
         )
     except Exception as exc:  # noqa: BLE001 — report any failure, never raise

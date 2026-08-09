@@ -90,6 +90,22 @@ async def test_generation_defaults_to_a_small_fast_set() -> None:
     )
 
 
+async def test_history_read_failure_does_not_block_generation(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """Repeat avoidance is optional; a history outage must not stop practice."""
+    from app.services.questions import QuestionService
+
+    async def unavailable_history(self, **kwargs):
+        raise RuntimeError("simulated history-table outage")
+
+    monkeypatch.setattr(QuestionService, "recent_prompts", unavailable_history)
+
+    body = await generate(client, count=1)
+
+    assert len(body["questions"]) == 1
+
+
 async def test_generation_job_returns_immediately_then_completes(client: AsyncClient) -> None:
     """A slow model must not hold the browser's POST connection open."""
     request = {

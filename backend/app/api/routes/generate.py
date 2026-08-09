@@ -226,13 +226,19 @@ async def generate(
 
     service = QuestionService(db)
 
-    avoid = (
-        await service.recent_prompts(
-            topic=request.topic.value, difficulty=request.difficulty.value
-        )
-        if request.avoid_repeats
-        else None
-    )
+    avoid: list[str] | None = None
+    if request.avoid_repeats:
+        try:
+            avoid = await service.recent_prompts(
+                topic=request.topic.value, difficulty=request.difficulty.value
+            )
+        except Exception:  # noqa: BLE001 - history must not block studying
+            # History improves question variety but must never stop a student
+            # from generating a fresh question when a database query fails.
+            logger.exception(
+                "could not load recent questions; generating without repeat filter"
+            )
+            await db.rollback()
 
     try:
         result = await asyncio.wait_for(

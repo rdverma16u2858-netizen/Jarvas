@@ -52,7 +52,7 @@ async def test_health_reports_every_component(client: AsyncClient) -> None:
 
     assert set(body["components"]) == {"database", "cache"}
     assert body["environment"] == "local"
-    assert body["version"] == "0.1.4"
+    assert body["version"] == "0.1.5"
 
 
 async def test_database_component_is_up(client: AsyncClient) -> None:
@@ -61,7 +61,7 @@ async def test_database_component_is_up(client: AsyncClient) -> None:
     database = body["components"]["database"]
 
     assert database["status"] == "up"
-    assert database["detail"] == "sqlite"
+    assert database["detail"] == "sqlite + practice schema"
     # A real round trip takes measurable time; None would mean the check was skipped.
     assert database["latency_ms"] is not None
 
