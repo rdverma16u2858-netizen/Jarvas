@@ -27,7 +27,7 @@ from app.cache.client import cache
 from app.core import auth
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
-from app.db.session import dispose_engine, ensure_schema
+from app.db.session import dispose_engine
 from app.llm.errors import LLMError
 from app.llm.factory import get_provider
 from app.services.generation_jobs import generation_jobs
@@ -70,15 +70,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     cache.init()
-
-    # Alembic runs before uvicorn in the container. This is a second, safe
-    # guard for a partially provisioned managed database: create_all only adds
-    # missing mapped tables and never drops or overwrites student data.
-    try:
-        await ensure_schema()
-        logger.info("database schema ready")
-    except Exception:  # noqa: BLE001 - health must still explain a DB outage
-        logger.exception("database schema check failed during startup")
 
     # Build the LLM provider now so a missing key or an unknown provider name
     # fails at boot with a clear message, rather than on the first question a
