@@ -52,7 +52,7 @@ async def test_health_reports_every_component(client: AsyncClient) -> None:
 
     assert set(body["components"]) == {"database", "cache"}
     assert body["environment"] == "local"
-    assert body["version"] == "0.1.5"
+    assert body["version"] == "0.1.6"
 
 
 async def test_database_component_is_up(client: AsyncClient) -> None:
@@ -64,6 +64,20 @@ async def test_database_component_is_up(client: AsyncClient) -> None:
     assert database["detail"] == "sqlite + practice schema"
     # A real round trip takes measurable time; None would mean the check was skipped.
     assert database["latency_ms"] is not None
+
+
+async def test_schema_guard_repairs_a_missing_practice_table(client: AsyncClient) -> None:
+    """A managed database must not claim healthy while Practice lacks its table."""
+    from app.db.base import Base
+    from app.db.session import engine, ensure_schema
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.drop_all)
+
+    await ensure_schema()
+
+    database = (await client.get("/api/v1/health")).json()["components"]["database"]
+    assert database["status"] == "up"
 
 
 async def test_memory_cache_reports_degraded_not_up(client: AsyncClient) -> None:

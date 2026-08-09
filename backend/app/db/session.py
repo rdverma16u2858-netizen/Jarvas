@@ -104,6 +104,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def ensure_schema() -> None:
+    """Create any missing mapped tables as a deployment safety net.
+
+    Alembic remains the source of truth for schema changes. This only repairs
+    the production failure where a database recorded a migration revision but
+    the corresponding table was absent, which otherwise lets the API boot and
+    fail only when a student presses Generate.
+    """
+    # Import at call time: importing models while this module builds the
+    # engine would create a circular import during application startup.
+    from app import models  # noqa: F401
+    from app.db.base import Base
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+
 async def dispose_engine() -> None:
     """Close every pooled connection. Called from the app's shutdown hook.
 
