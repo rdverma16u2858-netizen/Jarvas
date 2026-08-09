@@ -14,6 +14,8 @@ WHAT MATTERS HERE
     · Answers must be withheld until the student asks for them.
 """
 
+import asyncio
+
 import pytest
 from httpx import AsyncClient
 
@@ -86,6 +88,49 @@ async def test_generation_defaults_to_a_small_fast_set() -> None:
         GenerateRequest(topic="calculus", difficulty="medium", type="multiple_choice").count
         == 3
     )
+
+
+async def test_generation_job_returns_immediately_then_completes(client: AsyncClient) -> None:
+    """A slow model must not hold the browser's POST connection open."""
+    request = {
+        "topic": "calculus",
+        "difficulty": "medium",
+        "type": "multiple_choice",
+        "count": 1,
+    }
+    headers = {"Idempotency-Key": "test-job-completes"}
+
+    accepted = await client.post("/api/v1/generate/jobs", json=request, headers=headers)
+    assert accepted.status_code == 202, accepted.text
+    job_id = accepted.json()["id"]
+
+    for _ in range(30):
+        poll = await client.get(f"/api/v1/generate/jobs/{job_id}")
+        assert poll.status_code == 200, poll.text
+        body = poll.json()
+        if body["status"] == "completed":
+            assert len(body["result"]["questions"]) == 1
+            return
+        await asyncio.sleep(0.01)
+
+    pytest.fail("generation job did not complete")
+
+
+async def test_generation_job_reuses_an_idempotency_key(client: AsyncClient) -> None:
+    """A proxy retry must not purchase a second model call or duplicate rows."""
+    request = {
+        "topic": "calculus",
+        "difficulty": "medium",
+        "type": "multiple_choice",
+        "count": 1,
+    }
+    headers = {"Idempotency-Key": "test-job-retry"}
+
+    first = await client.post("/api/v1/generate/jobs", json=request, headers=headers)
+    second = await client.post("/api/v1/generate/jobs", json=request, headers=headers)
+
+    assert first.status_code == second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
 
 
 async def test_generation_deadline_returns_json_instead_of_dropping_connection(

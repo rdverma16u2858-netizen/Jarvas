@@ -30,6 +30,7 @@ from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine
 from app.llm.errors import LLMError
 from app.llm.factory import get_provider
+from app.services.generation_jobs import generation_jobs
 
 # Configure logging at import, before any module logs anything.
 configure_logging()
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield  # ── application serves requests here ──
 
     logger.info("shutting down")
+    await generation_jobs.shutdown()
     await cache.close()
     await dispose_engine()
 

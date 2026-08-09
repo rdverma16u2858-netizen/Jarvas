@@ -17,7 +17,7 @@
  *   a 422 from a dropdown the user can see but the API rejects.
  */
 
-import { apiFetch } from "./api";
+import { ApiError, apiFetch } from "./api";
 
 export type QuestionType =
   | "multiple_choice"
@@ -74,6 +74,14 @@ export interface GenerateResponse {
   total_ms: number;
 }
 
+type GenerationJob = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  result: GenerateResponse | null;
+  error: string | null;
+  error_status: number | null;
+};
+
 export interface Vocabulary {
   topics: string[];
   difficulties: string[];
@@ -106,11 +114,61 @@ export function generateQuestions({
   signal,
   ...body
 }: GenerateOptions): Promise<GenerateResponse> {
-  return apiFetch<GenerateResponse>("/generate", {
+  return startAndWaitForGeneration(body, signal);
+}
+
+const POLL_INTERVAL_MS = 1_250;
+const POLL_TIMEOUT_MS = 75_000;
+
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer);
+        reject(new DOMException("Request aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
+function idempotencyKey(): string {
+  // Keeps a connection retry from creating a second paid model request.
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+async function startAndWaitForGeneration(
+  body: Omit<GenerateOptions, "signal">,
+  signal?: AbortSignal,
+): Promise<GenerateResponse> {
+  const job = await apiFetch<GenerationJob>("/generate/jobs", {
     method: "POST",
     body: JSON.stringify(body),
+    headers: { "Idempotency-Key": idempotencyKey() },
     signal,
   });
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  let current = job;
+  while (Date.now() < deadline) {
+    if (current.status === "completed" && current.result) return current.result;
+    if (current.status === "failed") {
+      throw new ApiError(
+        current.error ?? "Could not generate questions.",
+        current.error_status ?? 502,
+      );
+    }
+
+    await wait(POLL_INTERVAL_MS, signal);
+    current = await apiFetch<GenerationJob>(`/generate/jobs/${current.id}`, { signal });
+  }
+
+  throw new ApiError(
+    "Generation is taking longer than expected. Please try again.",
+    504,
+  );
 }
 
 export function getVocabulary(): Promise<Vocabulary> {

@@ -26,14 +26,14 @@ WHY THE ANSWER IS WITHHELD UNTIL THE STUDENT ASKS
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.ratelimit import llm_rate_limit
-from app.db.session import get_db
+from app.db.session import SessionFactory, get_db
 from app.llm.base import ModelTier
 from app.llm.errors import ConfigurationError, RateLimitError
 from app.llm.factory import get_provider
@@ -41,6 +41,7 @@ from app.math.generator import MAX_QUESTIONS, GenerationError, Generator
 from app.math.questions import QuestionType
 from app.math.schema import Difficulty, Topic
 from app.models.question import PracticeQuestion
+from app.services.generation_jobs import GenerationJob, generation_jobs
 from app.services.questions import QuestionService
 
 logger = get_logger(__name__)
@@ -148,6 +149,16 @@ class GenerateResponse(BaseModel):
     rejected: int
     model: str
     total_ms: float
+
+
+class GenerationJobOut(BaseModel):
+    """The state of an asynchronous practice-generation request."""
+
+    id: str
+    status: str
+    result: GenerateResponse | None = None
+    error: str | None = None
+    error_status: int | None = None
 
 
 class AttemptRequest(BaseModel):
@@ -301,6 +312,81 @@ async def generate(
         model=result.model,
         total_ms=result.total_ms,
     )
+
+
+def _job_out(job: GenerationJob) -> GenerationJobOut:
+    """Keep the in-process job representation out of the HTTP contract."""
+    return GenerationJobOut(
+        id=job.id,
+        status=job.state,
+        result=job.result if job.state == "completed" else None,
+        error=job.error if job.state == "failed" else None,
+        error_status=job.error_status if job.state == "failed" else None,
+    )
+
+
+async def _run_job(request: GenerateRequest) -> GenerateResponse:
+    """Run long work with a fresh session after the short POST has returned."""
+    async with SessionFactory() as session:
+        return await generate(request, session)
+
+
+@router.post(
+    "/jobs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=GenerationJobOut,
+    summary="Start practice generation without holding a browser connection open",
+    responses={503: {"description": "No LLM provider configured"}},
+)
+async def start_generation_job(
+    request: GenerateRequest,
+    http: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> GenerationJobOut:
+    """Queue long generation and return an ID the browser can safely poll.
+
+    The idempotency key is generated once in the browser. If a proxy loses the
+    tiny 202 response, its retry receives the same job rather than purchasing
+    a second model call or saving duplicate questions.
+    """
+    key = (idempotency_key or "").strip()
+    if not key or len(key) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A valid Idempotency-Key header is required.",
+        )
+
+    if existing := await generation_jobs.find(key):
+        return _job_out(existing)
+
+    try:
+        get_provider()
+    except ConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+
+    # Charge the quota only after idempotency has ruled out a retried POST.
+    await llm_rate_limit(http)
+    job = await generation_jobs.start(key, lambda: _run_job(request))
+    return _job_out(job)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=GenerationJobOut,
+    summary="Poll a practice-generation job",
+    responses={404: {"description": "Job expired or the server restarted"}},
+)
+async def get_generation_job(job_id: str) -> GenerationJobOut:
+    """Return a small, retry-safe status payload while generation runs."""
+    job = await generation_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Generation job expired or the server restarted. Please generate again.",
+        )
+    return _job_out(job)
 
 
 # ── literal paths — MUST precede /questions/{question_id} ─────────────────

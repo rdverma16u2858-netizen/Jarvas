@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "MathBot API"
     # Bump on a backend release. The public health endpoint exposes this so
     # production can prove which release is actually serving traffic.
-    APP_VERSION: str = "0.1.3"
+    APP_VERSION: str = "0.1.4"
 
     # `local` enables /docs and verbose errors. `production` locks both down.
     ENV: Literal["local", "staging", "production"] = "local"
