@@ -52,7 +52,7 @@ async def test_health_reports_every_component(client: AsyncClient) -> None:
 
     assert set(body["components"]) == {"database", "cache"}
     assert body["environment"] == "local"
-    assert body["version"] == "0.1.2"
+    assert body["version"] == "0.1.3"
 
 
 async def test_database_component_is_up(client: AsyncClient) -> None:

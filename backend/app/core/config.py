@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "MathBot API"
     # Bump on a backend release. The public health endpoint exposes this so
     # production can prove which release is actually serving traffic.
-    APP_VERSION: str = "0.1.2"
+    APP_VERSION: str = "0.1.3"
 
     # `local` enables /docs and verbose errors. `production` locks both down.
     ENV: Literal["local", "staging", "production"] = "local"
@@ -188,9 +188,14 @@ class Settings(BaseSettings):
 
     # When Gemini reports that the chosen model is busy, unavailable, or has
     # no quota for this key, try these models in order before returning an
-    # error. A host can override this with a JSON list, for example:
-    # LLM_FALLBACK_MODELS=["gemini-3.1-flash-lite-preview"]
-    LLM_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.1-flash-lite-preview",)
+    # error. 2.5 Flash is tried first for keys where Google still exposes it;
+    # a 404 is handled automatically and then Flash Lite is used. A host can
+    # override this with a JSON list, for example:
+    # LLM_FALLBACK_MODELS=["gemini-2.5-flash", "gemini-3.1-flash-lite-preview"]
+    LLM_FALLBACK_MODELS: tuple[str, ...] = (
+        "gemini-2.5-flash",
+        "gemini-3.1-flash-lite-preview",
+    )
 
     # ── LLM behaviour ─────────────────────────────────────────────────────
     # Generous: a deep-tier model took 35s on one problem, and thinking-heavy
