@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "MathBot API"
     # Bump on a backend release. The public health endpoint exposes this so
     # production can prove which release is actually serving traffic.
-    APP_VERSION: str = "0.1.1"
+    APP_VERSION: str = "0.1.2"
 
     # `local` enables /docs and verbose errors. `production` locks both down.
     ENV: Literal["local", "staging", "production"] = "local"
@@ -196,6 +196,11 @@ class Settings(BaseSettings):
     # Generous: a deep-tier model took 35s on one problem, and thinking-heavy
     # requests legitimately run long. Too low a timeout looks like a hang.
     LLM_TIMEOUT: float = 180.0
+
+    # Practice generation must finish before Render's proxy gives up on a
+    # long-running request. This lower deadline produces a useful JSON 504,
+    # rather than a dropped connection the browser labels as unavailable.
+    GENERATION_TIMEOUT_SECONDS: float = 45.0
 
     # Retries apply to rate limits and 5xx only, never to a bad request.
     LLM_MAX_RETRIES: int = 3

@@ -330,6 +330,35 @@ async def test_busy_gemini_model_falls_back_without_showing_an_error(monkeypatch
     assert calls == [("busy-model", 0), ("backup-model", 0)]
 
 
+async def test_fast_tier_does_not_retry_a_busy_model_inside_one_request(monkeypatch) -> None:
+    """A long retry chain becomes a dropped proxy connection on free hosting."""
+    from app.core.config import settings
+
+    provider = _gemini()
+    monkeypatch.setattr(settings, "LLM_MODEL", "")
+    monkeypatch.setattr(settings, "LLM_FALLBACK_MODELS", ("fast-model",))
+    provider._models[ModelTier.FAST] = "fast-model"
+
+    calls: list[int | None] = []
+
+    async def fake_post(path, body, model, *, retries=None):
+        calls.append(retries)
+        raise RateLimitError("high demand", provider="gemini", model=model)
+
+    monkeypatch.setattr(provider, "_post", fake_post)
+
+    with pytest.raises(RateLimitError):
+        await provider._complete(
+            [Message(role="user", content="Make one question")],
+            tier=ModelTier.FAST,
+            system=None,
+            max_tokens=None,
+            json_schema=None,
+        )
+
+    assert calls == [0]
+
+
 async def test_api_key_never_appears_in_an_error_message() -> None:
     """A key leaked into a log or an HTTP response is a real incident."""
     provider = _gemini()

@@ -24,10 +24,13 @@ WHY THE ANSWER IS WITHHELD UNTIL THE STUDENT ASKS
     deliberate reveal.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.ratelimit import llm_rate_limit
 from app.db.session import get_db
@@ -192,6 +195,7 @@ class TopicsResponse(BaseModel):
         429: {"description": "Provider rate limit"},
         502: {"description": "The model could not be reached or gave unusable output"},
         503: {"description": "No LLM provider configured"},
+        504: {"description": "Generation exceeded the interactive deadline"},
     },
 )
 async def generate(
@@ -220,19 +224,27 @@ async def generate(
     )
 
     try:
-        result = await Generator(provider).generate(
-            topic=request.topic,
-            difficulty=request.difficulty,
-            question_type=request.type,
-            count=request.count,
-            concepts=request.concepts,
-            avoid=avoid,
-            tier=request.tier,
-            # Caching is off here on purpose. A cached generation would return
-            # the same questions to a student who explicitly asked for more,
-            # which reads as the feature being broken.
-            use_cache=False,
+        result = await asyncio.wait_for(
+            Generator(provider).generate(
+                topic=request.topic,
+                difficulty=request.difficulty,
+                question_type=request.type,
+                count=request.count,
+                concepts=request.concepts,
+                avoid=avoid,
+                tier=request.tier,
+                # Caching is off by design: "more questions" must be new questions.
+                use_cache=False,
+            ),
+            timeout=settings.GENERATION_TIMEOUT_SECONDS,
         )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=(
+                "Question generation took too long. No questions were saved; please try again."
+            ),
+        ) from exc
     except RateLimitError as exc:
         headers = {"Retry-After": str(int(exc.retry_after))} if exc.retry_after else None
         raise HTTPException(

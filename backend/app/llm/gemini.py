@@ -355,7 +355,10 @@ class GeminiProvider(LLMProvider):
                 # A different available model is more helpful than repeatedly
                 # retrying one overloaded model. With no backup configured,
                 # preserve the regular exponential-backoff behaviour.
-                retries = 0 if len(models) > 1 else None
+                # Retrying a busy FAST free-tier model inside one request can
+                # outlive Render's proxy deadline and turn into a browser
+                # network error. Return a timely, actionable API response.
+                retries = 0 if tier is ModelTier.FAST or len(models) > 1 else None
                 payload = await self._post(
                     f"models/{model}:generateContent", body, model, retries=retries
                 )

@@ -144,11 +144,17 @@ export default function PracticePage() {
         setError(
           caught.status === 429
             ? "Rate limited by the model provider."
+            : caught.status === 504
+              ? "Question generation took too long."
             : `API error ${caught.status}: ${caught.message}`,
         );
         if (caught.status === 429) {
           setHint(
             "The free tier allows a limited number of requests. Wait a moment, or set LLM_PROVIDER=mock in .env.",
+          );
+        } else if (caught.status === 504) {
+          setHint(
+            "No questions were saved. Try again with one question or a less demanding level.",
           );
         }
       } else {

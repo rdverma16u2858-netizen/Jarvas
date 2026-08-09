@@ -88,6 +88,37 @@ async def test_generation_defaults_to_a_small_fast_set() -> None:
     )
 
 
+async def test_generation_deadline_returns_json_instead_of_dropping_connection(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """A slow provider must become a readable 504 before Render times out."""
+    import asyncio
+
+    from app.math.generator import Generator
+
+    async def too_slow(self, **kwargs):
+        await asyncio.sleep(0.02)
+        raise AssertionError("wait_for should cancel this request")
+
+    monkeypatch.setattr(Generator, "generate", too_slow)
+    monkeypatch.setattr(settings, "GENERATION_TIMEOUT_SECONDS", 0.001)
+
+    response = await client.post(
+        "/api/v1/generate",
+        headers={"Origin": "http://localhost:3000"},
+        json={
+            "topic": "calculus",
+            "difficulty": "medium",
+            "type": "multiple_choice",
+            "count": 1,
+        },
+    )
+
+    assert response.status_code == 504
+    assert "No questions were saved" in response.json()["detail"]
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 async def test_a_wrong_answer_key_is_rejected(client: AsyncClient) -> None:
     """A question whose answer SymPy contradicts must never reach a student.
 
