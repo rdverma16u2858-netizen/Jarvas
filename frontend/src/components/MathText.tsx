@@ -33,6 +33,33 @@ import { useMemo } from "react";
 /** Split on $$...$$ (display) and $...$ (inline), keeping the delimiters. */
 const SPLIT = /(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g;
 
+// Practice questions come from an LLM. Most correctly use `$...$`, but some
+// return a sentence followed by a bare expression such as
+// `Evaluate I = \int_0^1 x^2 dx.`. Treat that final expression as display
+// math instead of exposing its TeX source to the student.
+const RAW_MATH_START =
+  /(?:\b[A-Za-z]\s*=\s*)?\\(?:frac|dfrac|tfrac|int|iint|iiint|sum|prod|lim|sqrt|left|begin|sin|cos|tan|cot|sec|csc|log|ln|exp|pi|theta|alpha|beta|gamma|delta|vec|overline|underline|partial|nabla)/;
+
+function normaliseUndelimitedMath(text: string): string {
+  // Explicit delimiters are authoritative. Never try to reinterpret prose
+  // that already tells us where its inline and display mathematics starts.
+  if (!text || text.includes("$")) return text;
+
+  const match = RAW_MATH_START.exec(text);
+  if (!match || match.index == null) return text;
+
+  const before = text.slice(0, match.index);
+  let math = text.slice(match.index).trim();
+  let punctuation = "";
+  const end = math.match(/([.!?])$/);
+  if (end) {
+    punctuation = end[1];
+    math = math.slice(0, -1).trimEnd();
+  }
+
+  return `${before}$$${math}$$${punctuation}`;
+}
+
 function render(latex: string, display: boolean): string | null {
   try {
     return katex.renderToString(latex, {
@@ -62,7 +89,7 @@ export function MathText({
   className?: string;
 }) {
   const parts = useMemo(() => {
-    const text = children ?? "";
+    const text = normaliseUndelimitedMath(children ?? "");
     return text.split(SPLIT).filter(Boolean).map((part, index) => {
       const isDisplay = part.startsWith("$$") && part.endsWith("$$");
       const isInline =
