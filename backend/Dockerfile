@@ -62,10 +62,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 #           health check with no error in the app's own logs — it looks like
 #           the app never started. ${PORT:-8000} keeps local Docker working.
 #
-#   migrate A fresh database has no tables. Without this the container comes
-#           up healthy and then fails every request with "relation does not
-#           exist". `alembic upgrade head` is idempotent, so it is safe on
-#           every boot and restart.
+#   migrate A fresh database has no tables. `alembic upgrade head` remains the
+#           normal path, but it is bounded: a managed database lock must not
+#           leave the entire public site unreachable forever. The API health
+#           report verifies the practice schema after startup.
 #
 # Overridden by docker-compose in development to add --reload.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "timeout 20s alembic upgrade head || echo 'migration did not finish before startup'; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
