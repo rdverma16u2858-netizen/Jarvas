@@ -1,0 +1,53 @@
+# What never belongs in the image.
+# ---------------------------------------------------------------------------
+# `COPY . .` takes everything in the build context. Without this file that
+# includes the test suite, local databases, and every __pycache__ directory
+# from the host — none of which the container runs, all of which it pays for
+# in image size, and therefore in COLD START TIME.
+#
+# On a free tier that spins the container down after ~15 minutes idle, boot
+# time is not a detail: it is what a visitor waits through on the first
+# request. A smaller image is pulled and started faster, every time.
+
+# Local databases. These are the developer's own data and must never ship —
+# in production the database is Postgres, and a stray SQLite file next to the
+# app is a confusing thing to find.
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets. Belt and braces: .env is gitignored, but the build context is the
+# working directory, not the git index, so an untracked .env would otherwise
+# be copied straight into the image.
+.env
+.env.*
+!.env.example
+
+# Tests and their caches. The image runs the app; CI runs the tests.
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python build artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments, if one was created in place
+.venv/
+venv/
+env/
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docs and git metadata
+*.md
+.git/
+.gitignore

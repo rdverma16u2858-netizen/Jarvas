@@ -56,29 +56,110 @@ export function getOcrLimits(): Promise<OcrLimits> {
   );
 }
 
+/** Longest edge, in pixels, that a photograph is reduced to before upload. */
+const MAX_EDGE = 1600;
+
+/** JPEG quality for the reduced image. */
+const QUALITY = 0.85;
+
+/**
+ * Shrink a photograph before sending it.
+ *
+ * A phone camera produces 3-6 MB at 4000px across. None of that resolution
+ * helps read a line of handwriting, and all of it hurts: minutes of upload on
+ * mobile data, a base64 payload a third larger again, and a free-tier
+ * container holding the whole thing in memory while it forwards it.
+ *
+ * 1600px on the long edge is comfortably enough to read handwritten
+ * mathematics and typically lands under 400 KB — often a tenfold reduction.
+ *
+ * Falls back to the original file on any failure. A slow upload is worse than
+ * a fast one; a broken one is worse than both.
+ */
+async function downscale(file: File): Promise<File> {
+  // Nothing to gain on an image that is already small.
+  if (file.size < 400_000) return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1) {
+      bitmap.close();
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", QUALITY),
+    );
+    if (!blob || blob.size >= file.size) return file;
+
+    return new File([blob], "scan.jpg", { type: "image/jpeg" });
+  } catch {
+    // Unsupported format, out of memory on an old phone, a canvas the browser
+    // refuses to read back — none of these should stop the upload.
+    return file;
+  }
+}
+
 export async function extractFromImage(
   file: File,
   { hint = "", signal }: { hint?: string; signal?: AbortSignal } = {},
 ): Promise<Extraction> {
+  const upload = await downscale(file);
+
   const form = new FormData();
-  form.append("image", file);
+  form.append("image", upload);
   form.append("hint", hint);
 
-  let response: Response;
-  try {
-    // No Content-Type header on purpose — see the module docstring. The auth
-    // header is fine to set: it is the boundary that must be left alone.
-    response = await fetch(`${API_BASE_URL}/ocr`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: form,
-      signal,
-    });
-  } catch (cause) {
-    if ((cause as Error)?.name === "AbortError") throw cause;
-    throw new NetworkError(
-      `Cannot reach the API at ${API_BASE_URL}. Is the backend running?`,
-    );
+  // The same cold-start tolerance every other request gets. This call does not
+  // go through apiFetch — multipart needs the browser to set its own
+  // Content-Type boundary — and it was the ONE request left without a retry,
+  // so scanning was the one feature that broke against a sleeping backend
+  // while the rest of the app waited politely.
+  const WAKE_RETRIES = 10;
+  const WAKE_DELAY_MS = 4000;
+
+  let response: Response | null = null;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // No Content-Type header on purpose — see the module docstring. The auth
+      // header is fine to set: it is the boundary that must be left alone.
+      response = await fetch(`${API_BASE_URL}/ocr`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: form,
+        signal,
+      });
+      break;
+    } catch (cause) {
+      if ((cause as Error)?.name === "AbortError") throw cause;
+
+      // Nothing reached the server, so re-sending cannot duplicate work.
+      if (attempt < WAKE_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, WAKE_DELAY_MS));
+        continue;
+      }
+
+      throw new NetworkError(
+        `Cannot reach the API at ${API_BASE_URL}. Is the backend running?`,
+      );
+    }
+  }
+
+  // The loop either assigns a response or throws; TypeScript cannot see that
+  // through the retry.
+  if (response === null) {
+    throw new NetworkError(`Cannot reach the API at ${API_BASE_URL}.`);
   }
 
   if (response.status === 401) {

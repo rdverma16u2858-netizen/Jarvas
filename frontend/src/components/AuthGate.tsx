@@ -42,7 +42,11 @@ type Gate = "checking" | "waking" | "open" | "locked" | "unreachable";
  * every break, which reads as a broken deployment and is the single most
  * misleading thing it could say.
  */
-const WAKE_ATTEMPTS = 12;
+// Sized against what was actually observed, not a guess: a free-tier cold
+// start on this image runs 30-90 seconds, and on mobile data the round trips
+// on top push it further. Giving up at 60s meant the gate failed on exactly
+// the visits it exists to cover.
+const WAKE_ATTEMPTS = 36;
 const WAKE_INTERVAL_MS = 5000;
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
